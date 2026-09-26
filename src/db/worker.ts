@@ -29,6 +29,14 @@ const AUTO_LOCK_MS = 15 * 60 * 1000;
 type Db = any;
 
 let db: Db | null = null;
+/**
+ * The in-flight open, cached. Without this, two messages arriving close
+ * together both pass the `if (db)` guard, because there are two awaits before
+ * the assignment, and both call installOpfsSAHPoolVfs. That VFS holds
+ * exclusive file handles, so the second install fails and the failure looks
+ * random rather than like a race.
+ */
+let opening: Promise<Db> | null = null;
 /** Never written anywhere. Lost when this worker dies, which is intended. */
 let key: CryptoKey | null = null;
 let locksAt = 0;
@@ -36,16 +44,24 @@ let locksAt = 0;
 const uid = () => crypto.randomUUID();
 const now = () => Date.now();
 
-async function openDatabase(): Promise<Db> {
-  if (db) return db;
-  const sqlite3 = await sqlite3InitModule();
-  if (typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
-    throw new Error('opfs-sahpool is unavailable in this context');
-  }
-  const pool = await sqlite3.installOpfsSAHPoolVfs({ name: POOL_NAME });
-  db = new pool.OpfsSAHPoolDb(DB_PATH);
-  migrate();
-  return db;
+function openDatabase(): Promise<Db> {
+  if (db) return Promise.resolve(db);
+  if (opening) return opening;
+  opening = (async () => {
+    const sqlite3 = await sqlite3InitModule();
+    if (typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
+      throw new Error('opfs-sahpool is unavailable in this context');
+    }
+    const pool = await sqlite3.installOpfsSAHPoolVfs({ name: POOL_NAME });
+    db = new pool.OpfsSAHPoolDb(DB_PATH);
+    migrate();
+    return db;
+  })().catch((err) => {
+    // A failed open must not poison every later attempt.
+    opening = null;
+    throw err;
+  });
+  return opening;
 }
 
 function migrate(): void {
@@ -89,7 +105,9 @@ function lockVault(why: string): void {
 
 function state(): VaultState {
   autoLockIfDue();
-  if (!db) return { status: 'absent' };
+  // Never report a database we could not open as an absent vault. That screen
+  // offers to create one, and creating over an existing vault is data loss.
+  if (!db) return { status: 'unavailable', problem: 'the database could not be opened' };
   const hasVault = (db.selectValue('SELECT count(*) FROM vault') as number) > 0;
   if (!hasVault) return { status: 'absent' };
   return key ? { status: 'unlocked', locksAt } : { status: 'locked' };

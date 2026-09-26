@@ -75,7 +75,29 @@ async function launch() {
   fs.rmSync(PROFILE, { recursive: true, force: true });
 
   // ── Run 1: create, import, read back ────────────────────────────────
-  let { ctx, page } = await launch();
+  let { ctx, page, id } = await launch();
+
+  // Concurrency, against a cold profile. Several panels opening at once all
+  // ask the worker to open the database before it exists. Without a
+  // single-flight guard they each call installOpfsSAHPoolVfs, which holds
+  // exclusive file handles, and the extra ones fail in a way that looks random.
+  const racers = await Promise.all([ctx.newPage(), ctx.newPage(), ctx.newPage()]);
+  await Promise.all(racers.map((p) => p.goto(`chrome-extension://${id}/sidepanel.html`)));
+  const raced = await Promise.all(
+    racers.map((p) =>
+      p
+        .getByRole('button', { name: 'Create the vault' })
+        .waitFor({ timeout: 60000 })
+        .then(() => 'create')
+        .catch(async () => (await p.locator('body').innerText()).slice(0, 60)),
+    ),
+  );
+  check(
+    'concurrent cold opens all reach the same state',
+    raced.every((r) => r === 'create'),
+    raced.join(' | '),
+  );
+  await Promise.all(racers.map((p) => p.close()));
 
   await page.getByLabel('Passphrase').fill(PASSPHRASE);
   await page.getByRole('button', { name: 'Create the vault' }).click();

@@ -1,9 +1,11 @@
 /** Shared row and view types. No SQL here; the tables live in migrations/. */
 
-export type VaultStatus = 'absent' | 'locked' | 'unlocked';
+export type VaultStatus = 'absent' | 'locked' | 'unlocked' | 'unavailable';
 
 export interface VaultState {
   status: VaultStatus;
+  /** Set only when status is 'unavailable'. */
+  problem?: string;
   /** Epoch ms when an unlocked vault will auto-lock, if unlocked. */
   locksAt?: number;
 }

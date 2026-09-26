@@ -107,6 +107,18 @@ export function App() {
     );
   }
 
+  if (vault.status === 'unavailable') {
+    return (
+      <Screen>
+        <Heading>PageMyCV</Heading>
+        <ErrorNote>
+          The vault could not be opened: {vault.problem ?? 'unknown reason'}. Nothing has been
+          changed. Reopen the panel, and if it persists your data is still on disk.
+        </ErrorNote>
+      </Screen>
+    );
+  }
+
   if (vault.status !== 'unlocked') {
     const creating = vault.status === 'absent';
     return (
