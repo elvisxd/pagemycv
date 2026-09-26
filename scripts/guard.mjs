@@ -167,6 +167,20 @@ if (existsSync(FILL_DIR)) {
   if (!byPath.has('src/fill/visibility.ts'))
     fail('src/fill/', 'a fill path exists with no visibility gate beside it');
 
+  // A plan crosses two message hops before it is executed, so the element a
+  // ref points at can have been re-rendered into a different field. Writing
+  // without re-checking puts the right value in the wrong box and reports a
+  // success, which is the worst failure this code can have.
+  const writer = byPath.get('src/fill/write.ts');
+  if (!writer) {
+    fail('src/fill/', 'no writer; the guard cannot verify the write-time checks');
+  } else {
+    if (!/fingerprintOf\s*\(/.test(writer))
+      fail('src/fill/write.ts', 'writes without re-deriving the field fingerprint');
+    if (!/\.isConnected/.test(writer))
+      fail('src/fill/write.ts', 'writes without checking the element is still in the page');
+  }
+
   // The only module allowed to write to a page is the one whose whole job is
   // that, so a DOM write cannot quietly appear in the classifier or the
   // planner where no honeypot check guards it.
@@ -330,6 +344,7 @@ const ENFORCED = [
   'invariant 5, one network door',
   'the vault key never reaches persistent storage',
   'one door each to crypto.subtle, to SQLite and to writing the page',
+  'the writer re-checks the element before it writes',
   'no telemetry, direct or transitive',
   'the manifest permissions and CSP, and no host_permissions',
   'the content script reaches only the allowlisted job boards',

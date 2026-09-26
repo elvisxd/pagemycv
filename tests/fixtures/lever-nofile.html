@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Contract Engineer — Acme</title>
+  </head>
+  <body>
+    <h2>Contract Engineer</h2>
+    <!-- No file input anywhere. The CV bytes have nowhere to go, so they must
+         not be sent into this page's process at all. -->
+    <form id="application" action="/apply" method="post">
+      <label for="name">Full name</label>
+      <input type="text" id="name" name="name" />
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" />
+      <label for="phone">Phone</label>
+      <input type="tel" id="phone" name="phone" />
+      <label for="org">Current company</label>
+      <input type="text" id="org" name="org" />
+      <button type="submit">Submit application</button>
+    </form>
+    <script>
+      window.__submits = 0;
+      document.getElementById('application').addEventListener('submit', (e) => {
+        e.preventDefault();
+        window.__submits += 1;
+      });
+    </script>
+  </body>
+</html>

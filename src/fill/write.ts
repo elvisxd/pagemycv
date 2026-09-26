@@ -7,6 +7,7 @@
 // in any file, and tests/e2e/gate.cjs counts submits in a real browser.
 import { fromBase64 } from '../util/base64';
 import type { Control } from './descriptor';
+import { fingerprintOf } from './descriptor';
 import type { FillReport, PlannedField, ResumeFile } from './types';
 
 /**
@@ -50,10 +51,14 @@ const HIGHLIGHT = '2px solid #3b82f6';
  * Mark what was written. Stored on a WeakMap rather than a data attribute so
  * the page cannot read back which of its fields were machine-filled.
  */
-const PREVIOUS_OUTLINE = new WeakMap<Control, string>();
+const PREVIOUS_OUTLINE = new WeakMap<Control, { outline: string; offset: string }>();
 
 function highlight(el: Control): void {
-  if (!PREVIOUS_OUTLINE.has(el)) PREVIOUS_OUTLINE.set(el, el.style.outline);
+  // Both properties, because clearing only one leaves the page's own styling
+  // half-restored. A form that set its own outlineOffset would keep ours.
+  if (!PREVIOUS_OUTLINE.has(el)) {
+    PREVIOUS_OUTLINE.set(el, { outline: el.style.outline, offset: el.style.outlineOffset });
+  }
   el.style.outline = HIGHLIGHT;
   el.style.outlineOffset = '1px';
 }
@@ -62,8 +67,8 @@ export function clearHighlights(elements: Iterable<Control>): void {
   for (const el of elements) {
     const previous = PREVIOUS_OUTLINE.get(el);
     if (previous === undefined) continue;
-    el.style.outline = previous;
-    el.style.outlineOffset = '';
+    el.style.outline = previous.outline;
+    el.style.outlineOffset = previous.offset;
     PREVIOUS_OUTLINE.delete(el);
   }
 }
@@ -113,6 +118,33 @@ export function applyPlan(
         ref: field.ref,
         label: field.label,
         detail: 'the field disappeared before it could be written',
+      });
+      continue;
+    }
+    // Two checks between holding a reference and writing through it, because
+    // a plan crosses two message hops and a page can re-render in between.
+    //
+    // `isConnected` catches a node replaced by a re-render: writing to a
+    // detached node changes nothing anyone can see, and counting it as filled
+    // would be a report that lies.
+    if (!el.isConnected) {
+      failures.push({
+        ref: field.ref,
+        label: field.label,
+        detail: 'the field was removed from the page before it could be written',
+      });
+      continue;
+    }
+    // The fingerprint catches the worse case: React and friends REUSE DOM
+    // nodes across renders and change their attributes, so a held reference
+    // can still be in the document and no longer be the same field. Writing
+    // through it puts the right value in the wrong box and reports success.
+    const now = fingerprintOf(el);
+    if (now !== field.fingerprint) {
+      failures.push({
+        ref: field.ref,
+        label: field.label,
+        detail: `the field changed while the plan was being built (was ${field.fingerprint}, is ${now})`,
       });
       continue;
     }

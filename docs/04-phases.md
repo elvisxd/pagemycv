@@ -144,6 +144,8 @@ test in any way.**
 | Check | Result |
 |---|---|
 | **Zero sensitive fields filled**, nine of them on one form | pass |
+| A field beside a labelled one does **not** inherit its label | pass |
+| Nothing is attached to a form with nowhere to attach it | pass |
 | **Zero hidden fields written**, across nine techniques | pass |
 | Each trap refused **by a named guard**, not merely left unrecognised | pass |
 | It never submitted, on either board | pass |
@@ -160,7 +162,36 @@ test in any way.**
 | Each sensitive field gets its own row saying it is yours to answer | pass |
 | No request left the extension origin | pass |
 
-Plus 190 unit tests, up from 81.
+Plus 226 unit tests, up from 81, including a jsdom suite for the two modules
+that ARE the DOM boundary. `src/fill/descriptor.ts` and `src/fill/write.ts`
+had been reachable only through the browser gate, which made them the least
+tested and most dangerous code in the phase. The adversarial review found real
+bugs in both.
+
+### The review, after the phase passed its gate
+
+Seven findings, five of them proven by reverting the fix and watching a test
+go red.
+
+| Finding | Why it mattered |
+|---|---|
+| **A held element reference can become a different field.** A plan crosses two message hops, and frameworks reuse DOM nodes while changing their attributes. | The right value written into the wrong box, reported as a success. Every write action now carries a fingerprint the writer re-derives from the live element before touching it. |
+| **The sibling-label walk stepped over another control.** | The second input in a flat container inherited the first one's question. Reverting the fix makes the gate report `unlabelled_neighbour -> "ada@lovelace.test"`. |
+| **`closest(…, 'div')` matched almost anything.** | The same bug from the other side: the first label-ish descendant of a container holding several fields. The group now has to hold exactly one control. |
+| **The CV bytes were sent on every fill.** | Most application forms have no file input. The whole résumé was crossing into a page's process with nowhere to go, which is the opposite of why the plan is built in the background. |
+| **A detached node counted as filled.** | A write nobody can see, reported as a success. |
+| **A two-character prefix counted as an option match.** | `US` is a prefix of `Usually`. Exact matches still handle a two-letter code. |
+| **`catch(() => UNSUPPORTED)` swallowed real errors.** | A bug inside the content script was reported as "this site is not supported", which is the kind of lie that costs an afternoon. |
+
+Two smaller ones: the document size was being re-measured once per field, and
+`clearHighlights` restored `outline` but not `outlineOffset`, leaving a page's
+own styling half-restored.
+
+One comment was overclaiming and is now narrower. Not marking up the page does
+**not** mean the page cannot tell it is being filled: the highlight is an
+inline style it can read, and a page watching `input` events sees every write.
+What it buys is that the scan itself, including the fields that are then
+refused, is not announced.
 
 **No `host_permissions`, and not as a deferral.** The content script's own
 `matches` are the whole grant. The background reads a tab id and nothing else,

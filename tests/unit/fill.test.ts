@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { atsForUrl } from '../../src/ats/registry';
 import { classify } from '../../src/fill/detect';
 import { honeypotReason } from '../../src/fill/honeypot';
-import { buildPlan, chooseOption } from '../../src/fill/plan';
+import { buildPlan, chooseOption, planNeedsResume } from '../../src/fill/plan';
 import { SENSITIVE_MATCHER_KEYS, sensitiveKeyFor } from '../../src/fill/sensitive-match';
 import type { FieldDescriptor, FillValues, VisibilityMetrics } from '../../src/fill/types';
 import { visibilityProblem } from '../../src/fill/visibility';
@@ -26,8 +26,9 @@ const VISIBLE: VisibilityMetrics = {
 
 let counter = 0;
 function field(over: Partial<FieldDescriptor> = {}): FieldDescriptor {
-  return {
+  const base: FieldDescriptor = {
     ref: `f${counter++}`,
+    fingerprint: '',
     tag: 'input',
     type: 'text',
     name: '',
@@ -44,6 +45,12 @@ function field(over: Partial<FieldDescriptor> = {}): FieldDescriptor {
     options: [],
     metrics: VISIBLE,
     ...over,
+  };
+  // Keep the fingerprint consistent with the attributes unless a test sets it
+  // on purpose, so a plan built here is one the writer would accept.
+  return {
+    ...base,
+    fingerprint: over.fingerprint ?? [base.tag, base.type, base.name, base.id].join('|'),
   };
 }
 
@@ -470,7 +477,9 @@ describe('buildPlan', () => {
     const f = field({ tag: 'textarea', type: 'textarea', label: 'Cover letter' });
     const [row] = plan([f], { ...VALUES }).fields;
     if (row?.action !== 'skip') throw new Error('expected a skip');
-    expect(row.reason).toBe('no-value');
+    // Its own reason, not 'no-value'. "We hold nothing for this" and "we hold
+    // something and refuse to write it" are different promises to the user.
+    expect(row.reason).toBe('never-auto');
   });
 
   it('attaches the resume rather than typing a path into the file input', () => {
@@ -532,5 +541,83 @@ describe('buildPlan', () => {
     const filled = built.fields.filter((f) => f.action === 'fill');
     expect(filled).toHaveLength(5);
     for (const f of filled) if (f.action === 'fill') expect(f.value.length).toBeGreaterThan(0);
+  });
+});
+
+// ── What the review found ───────────────────────────────────────────────────
+
+describe('the fingerprint a plan carries', () => {
+  it('is on every write action, so the writer can re-check the element', () => {
+    const fields = [
+      field({ name: 'email', type: 'email', label: 'Email' }),
+      field({ type: 'file', name: 'resume', label: 'Resume' }),
+    ];
+    const built = plan(fields, VALUES, LEVER, 'cv.pdf');
+    for (const row of built.fields) {
+      if (row.action === 'skip') continue;
+      expect(row.fingerprint, row.label).toBe(fields.find((f) => f.ref === row.ref)?.fingerprint);
+    }
+  });
+
+  it('changes when the attributes that say what a field IS change', () => {
+    // The case this exists for: a framework reuses a DOM node across renders
+    // and changes its name. The reference is still valid and still in the
+    // document, and it is no longer the same field.
+    const before = field({ name: 'email', type: 'email' });
+    const after = field({ name: 'salary_expected', type: 'text' });
+    expect(before.fingerprint).not.toBe(after.fingerprint);
+  });
+
+  it('ignores the label, which can change while the field does not', () => {
+    const a = field({ name: 'email', type: 'email', label: 'Email' });
+    const b = field({ name: 'email', type: 'email', label: 'Email address *' });
+    expect(a.fingerprint).toBe(b.fingerprint);
+  });
+});
+
+describe('chooseOption, after the review', () => {
+  it('refuses a two-character prefix, which is a coincidence not a match', () => {
+    // "US" is a prefix of "Usually". A country list is not the only list a
+    // form has, and a two-letter code is still handled by the exact matches.
+    expect(chooseOption([{ value: 'x', text: 'Usually' }], 'US')).toBeNull();
+  });
+
+  it('still takes a two-character code from an exact value or text', () => {
+    expect(chooseOption([{ value: 'US', text: 'United States' }], 'us')).toBe('US');
+    expect(chooseOption([{ value: '1', text: 'US' }], 'US')).toBe('1');
+  });
+
+  it('still takes a longer unambiguous prefix', () => {
+    expect(
+      chooseOption(
+        [
+          { value: 'GB', text: 'United Kingdom' },
+          { value: 'US', text: 'United States' },
+        ],
+        'United King',
+      ),
+    ).toBe('GB');
+  });
+});
+
+describe('planNeedsResume', () => {
+  it('is false for a form with no file input, so the CV never leaves the vault', () => {
+    // Most application pages have no file input at all. Sending the bytes
+    // regardless would put the whole CV in a page's process on every fill.
+    const fields = [
+      field({ name: 'name', label: 'Full name' }),
+      field({ name: 'email', type: 'email', label: 'Email' }),
+    ];
+    expect(planNeedsResume(plan(fields, VALUES, LEVER, 'cv.pdf'))).toBe(false);
+  });
+
+  it('is false when a resume field exists but nothing is stored', () => {
+    const fields = [field({ type: 'file', name: 'resume', label: 'Resume' })];
+    expect(planNeedsResume(plan(fields, VALUES))).toBe(false);
+  });
+
+  it('is true only when the plan actually attaches something', () => {
+    const fields = [field({ type: 'file', name: 'resume', label: 'Resume' })];
+    expect(planNeedsResume(plan(fields, VALUES, LEVER, 'cv.pdf'))).toBe(true);
   });
 });

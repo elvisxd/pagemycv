@@ -79,6 +79,17 @@ forced by evidence rather than by taste.
 | **`website`** | **On the denylist, released by evidence** | A real field on Lever and Greenhouse, a honeypot on Workday. It is released only when the field is both visible and labelled, never one, because a honeypot with a visible label would be warning the humans it is trying to catch. |
 | **Cross-layer message routing** | **A `Record` over the protocol type at both hops** | A list of registrations let a message be added everywhere except the one place that routes it, compile cleanly, and fail at runtime as *"the message port closed before a response was received"*. |
 
+## Decided by the Phase 2 review
+
+| Decision | Chose | Because |
+|---|---|---|
+| **Trusting an element reference across a message hop** | **Never. Re-derive a fingerprint and check `isConnected` at write time** | A plan crosses two hops, and frameworks reuse DOM nodes while changing their attributes. A live reference is not evidence that it is still the same field, and writing through a stale one puts the right value in the wrong box and calls it a success. |
+| **Where a label may come from** | **Only from something that can only be describing THIS field** | The sibling walk stops at another control and the group lookup requires the group to hold exactly one. Both were handing a field its neighbour's question. |
+| **Sending the résumé** | **Only when the plan has somewhere to put it** | Most application forms have no file input at all. Sending it regardless put the whole CV in a page's process for nothing, which is the opposite of why the plan is built in the background. |
+| **Testing the DOM boundary** | **jsdom, for `descriptor.ts` and `write.ts` only** | They were reachable only through the browser gate, which made the two most dangerous modules the two least tested. Layout and `DataTransfer` stay the gate's job. |
+| **A loose option match** | **At least three characters** | `US` is a prefix of `Usually`. The exact matches above still handle a two-letter country code, which is the case that matters. |
+| **Reporting an unreachable content script** | **Only a connection error means "unsupported site"** | `catch(() => UNSUPPORTED)` turned a bug inside our own content script into a claim about the user's page. |
+
 ## Still open
 
 One thing, and it is the only one that could still change the shape of the

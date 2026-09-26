@@ -100,6 +100,15 @@
         </select>
       </div>
 
+      <!-- A flat container holding TWO controls and one label. The second
+           must not inherit the first's question: that is how an email address
+           ends up in a salary box. -->
+      <div class="fields">
+        <label for="shared_email">Email</label>
+        <input type="text" id="shared_email" name="shared_email">
+        <input type="text" name="unlabelled_neighbour">
+      </div>
+
       <!-- A disabled field that is otherwise perfectly recognisable. -->
       <div class="field">
         <label for="locked_email">Email</label>

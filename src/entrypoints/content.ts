@@ -25,21 +25,34 @@ export default defineContentScript({
      * The elements behind the last description, keyed by ref.
      *
      * Held here rather than marked on the page: a `data-*` attribute on every
-     * control would be a fingerprint the page could read back, and a page that
-     * can tell it is being autofilled is a page that can behave differently
-     * while it is.
+     * control would announce the scan itself, including for the fields that
+     * are then refused. The values that ARE written are visible to the page
+     * either way; the list of what was considered does not have to be.
      */
     let elements = new Map<string, Control>();
+    /**
+     * Bumped on every describe. A plan carries the number it was built from,
+     * and a plan from an older pass is refused rather than applied to the
+     * newer pass's elements: two panels, or one panel clicked twice, would
+     * otherwise interleave a describe between the other's describe and apply.
+     */
+    let generation = 0;
 
     onFill('fill:describe', () => {
       const survey = describeForm(document);
       elements = survey.elements;
-      return { url: location.href, fields: survey.fields };
+      generation++;
+      return { url: location.href, fields: survey.fields, generation };
     });
 
-    onFill('fill:apply', ({ data }) =>
-      applyPlan(data.plan.fields, elements, data.resume, location.href, data.plan.ats),
-    );
+    onFill('fill:apply', ({ data }) => {
+      if (data.generation !== generation) {
+        throw new Error(
+          'the page was read again before this fill could run, so nothing was written. Try again.',
+        );
+      }
+      return applyPlan(data.plan.fields, elements, data.resume, location.href, data.plan.ats);
+    });
 
     onFill('fill:clear', () => {
       clearHighlights(elements.values());

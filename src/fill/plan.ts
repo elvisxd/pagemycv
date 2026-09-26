@@ -63,6 +63,8 @@ function displayLabel(field: FieldDescriptor): string {
  * over the exact one. Returns null rather than guessing when nothing is clear,
  * which leaves the field for the user.
  */
+const MIN_LOOSE_MATCH = 3;
+
 export function chooseOption(
   options: readonly { value: string; text: string }[],
   value: string,
@@ -73,6 +75,12 @@ export function chooseOption(
 
   for (const o of options) if (norm(o.value) === want) return o.value;
   for (const o of options) if (norm(o.text) === want) return o.value;
+
+  // Below this, a prefix is a coincidence rather than a match: "US" is a
+  // prefix of "Usually", and a country list is not the only list a form has.
+  // An exact match on the value or the text above still handles a two-letter
+  // code, which is the case that matters.
+  if (want.length < MIN_LOOSE_MATCH) return null;
 
   const prefixed = options.filter((o) => norm(o.text).startsWith(want));
   if (prefixed.length === 1) return (prefixed[0] as { value: string }).value;
@@ -157,6 +165,7 @@ export function buildPlan(
       planned.push({
         action: 'attach',
         ref: field.ref,
+        fingerprint: field.fingerprint,
         label,
         kind: 'resume_file',
         strategy: c.strategy,
@@ -171,7 +180,10 @@ export function buildPlan(
       continue;
     }
     if (NEVER_AUTOFILL.has(c.kind)) {
-      skip('no-value', `${c.kind.replace(/_/g, ' ')} is never written automatically`);
+      // Its own reason, not 'no-value': "we hold nothing for this" and "we
+      // hold something and refuse to write it" are different promises, and
+      // the review list should not blur them.
+      skip('never-auto', `${c.kind.replace(/_/g, ' ')} is never written automatically`);
       continue;
     }
 
@@ -196,6 +208,7 @@ export function buildPlan(
       planned.push({
         action: 'fill',
         ref: field.ref,
+        fingerprint: field.fingerprint,
         label,
         kind: c.kind,
         strategy: c.strategy,
@@ -209,6 +222,7 @@ export function buildPlan(
     planned.push({
       action: 'fill',
       ref: field.ref,
+      fingerprint: field.fingerprint,
       label,
       kind: c.kind,
       strategy: c.strategy,
@@ -218,6 +232,18 @@ export function buildPlan(
   }
 
   return { ats: ats.id, fields: planned };
+}
+
+/**
+ * Whether this plan has anywhere to put the resume.
+ *
+ * The bytes cross into the page's process only when the answer is yes. Most
+ * application forms have one file input and many have none, and sending the
+ * whole CV either way would undo the reason the plan is built in the
+ * background rather than in the tab.
+ */
+export function planNeedsResume(plan: FillPlan): boolean {
+  return plan.fields.some((f) => f.action === 'attach');
 }
 
 /** Exposed so the gate can assert the list rather than trust the comment. */
