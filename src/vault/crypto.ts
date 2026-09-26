@@ -37,7 +37,9 @@ export const PAD_BLOCK = 64;
 export const MIN_PASSPHRASE = 12;
 
 export function passphraseProblem(passphrase: string): string | null {
-  if (passphrase.length < MIN_PASSPHRASE) {
+  // Measured on the same normalized form the key is derived from, so the rule
+  // and the derivation never disagree about what the passphrase is.
+  if (passphrase.normalize('NFC').length < MIN_PASSPHRASE) {
     return `the passphrase needs at least ${MIN_PASSPHRASE} characters`;
   }
   return null;
@@ -56,7 +58,13 @@ export function randomSalt(): Uint8Array<ArrayBuffer> {
 
 export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
   const raw = await argon2id({
-    password: passphrase,
+    // Normalize first. "contraseña" typed on macOS often arrives decomposed
+    // (n + combining tilde) and on Linux or Windows composed (ñ). Those are
+    // different byte sequences, so Argon2id derives different keys from what
+    // the user believes is one passphrase: the vault opens on the machine that
+    // created it and reports "wrong passphrase" everywhere else, with no
+    // recovery because the key is never stored. NFC is the composed form.
+    password: passphrase.normalize('NFC'),
     salt,
     ...KDF,
     outputType: 'binary',
@@ -78,8 +86,9 @@ export function aad(
   rowId: string,
   column: string,
   version = SCHEMA_VERSION,
+  padded = false,
 ): Uint8Array<ArrayBuffer> {
-  return enc.encode(`${rowId}.${column}.${version}`);
+  return enc.encode(JSON.stringify([rowId, column, version, padded]));
 }
 
 function pad(bytes: Uint8Array, block: number): Uint8Array<ArrayBuffer> {
@@ -94,6 +103,13 @@ function pad(bytes: Uint8Array, block: number): Uint8Array<ArrayBuffer> {
 
 function unpad(padded: Uint8Array): Uint8Array<ArrayBuffer> {
   const len = ((padded[0] ?? 0) << 8) | (padded[1] ?? 0);
+  // Without this, reading an unpadded blob as padded silently returns a slice
+  // of the plaintext rather than failing: 'hello' comes back as 'llo'. The AAD
+  // now makes that mismatch fail authentication first, and this is the second
+  // line of defence for a blob that was corrupted rather than mislabelled.
+  if (len > padded.length - 2) {
+    throw new Error('padded value is malformed: the declared length exceeds the block');
+  }
   return padded.slice(2, 2 + len);
 }
 
@@ -114,7 +130,7 @@ export async function encryptValue(
   const body = opts.padded ? pad(enc.encode(plaintext), PAD_BLOCK) : enc.encode(plaintext);
   const ct = new Uint8Array(
     await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv, additionalData: aad(rowId, column) },
+      { name: 'AES-GCM', iv, additionalData: aad(rowId, column, SCHEMA_VERSION, !!opts.padded) },
       key,
       own(body),
     ),
@@ -137,7 +153,7 @@ export async function decryptValue(
   const ct = blob.slice(IV_BYTES);
   const plain = new Uint8Array(
     await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv, additionalData: aad(rowId, column) },
+      { name: 'AES-GCM', iv, additionalData: aad(rowId, column, SCHEMA_VERSION, !!opts.padded) },
       key,
       own(ct),
     ),

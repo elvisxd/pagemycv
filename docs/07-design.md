@@ -62,13 +62,25 @@ It also turns out to be more honest semantically. Green and amber imply pass and
 fail. But both states mean the same thing, "we typed this"; what differs is
 confidence. Blue and orange read as a confidence axis rather than a verdict.
 
-| State | Radix scale | Chip background | Border | Text | Glyph |
+| State | Radix scale | Chip background | Label text | Glyph | Glyph |
 |---|---|---|---|---|---|
-| **Filled** | `blue` | step 3 | step 6 | step 11 | `✓` |
-| **Review** | `orange` | step 3 | step 6 | step 11 | `!` |
-| **Sensitive** | `plum` | step 3 | step 6 | step 11 | `◆` |
-| **Skipped** | `slate` | step 2 | step 6 | step 11 | `–` |
-| **Error** | `red` | step 3 | step 6 | step 11 | `×` |
+| **Filled** | `blue` | step 2 | step 12 | step 11 | `✓` |
+| **Review** | `orange` | step 2 | step 12 | step 11 | `!` |
+| **Sensitive** | `plum` | step 2 | step 12 | step 11 | `◆` |
+| **Skipped** | `gray` | step 2 | step 12 | step 11 | `–` |
+| **Error** | `red` | step 2 | step 12 | step 11 | `×` |
+
+**The label is step 12, not step 11, and that was measured rather than chosen.**
+Step 11 is Radix's low-contrast text step and the obvious pick. In the light
+theme it fails: blue reaches 4.25:1 against step 3 and orange 3.99:1, against a
+requirement of 4.5:1. No background step rescues orange; every warm scale except
+`tomato` fails at step 11. Step 12 is the same hue, just darker, and it clears
+the requirement in both themes with room to spare. The glyph keeps step 11, so
+the hue still reads at a glance.
+
+The chip border was dropped. At step 8 it measures about 2.2:1, and a chip is a
+status indicator rather than a control, so WCAG 1.4.11 does not require it to
+pass. The **control** border does, and it moved from step 6 to step 9.
 
 Two rules that come out of the research and are easy to get wrong:
 
@@ -98,8 +110,12 @@ status, spending it on branding makes the status harder to read.
 **Radix targets APCA. You will be audited against WCAG 2.2, which is a different
 algorithm.** Steps 11 and 12 are a good starting point, not a passing grade.
 
-**A CI test asserts at least 4.5:1 for all five state text and background pairs,
-in both themes.** That test is worth more than any palette choice.
+**`tests/unit/contrast.test.ts` asserts every pair, in both themes**, reading
+the hex values out of the installed Radix stylesheets so a version bump that
+shifts a scale fails there rather than in someone's eyes. It did not exist when
+this document first claimed it did, and when it was finally written two of the
+five state colours were failing. It also pins the reason step 11 was rejected,
+so a future change cannot quietly go back.
 
 On standards, so this does not get relitigated:
 
@@ -113,8 +129,11 @@ On standards, so this does not get relitigated:
 
 | | |
 |---|---|
-| **2.5.8 Target Size, AA** | Every interactive target at least 24 by 24 CSS pixels. In a dense per-field list this is the likely real compliance gap. |
+| **2.5.8 Target Size, AA** | Every interactive target at least 24 by 24 CSS pixels. Met: buttons are 32 high, the passphrase field 36. |
 | **2.4.11 Focus Not Obscured, AA** | A focused row must not be hidden behind a sticky header or action bar. |
+| **1.4.11 Non-text Contrast, AA** | The control border is Radix step 9, which measures 3.24:1 in light and 3.70:1 in dark. Step 6, the subtle-separator step, measured 1.38:1 and was the only boundary the passphrase field had. |
+| **4.1.3 Status Messages, AA** | The import result and the opening state are `role="status"` with `aria-live="polite"`. |
+| **3.3.2 and 1.3.5** | The passphrase field carries `autocomplete`, so a password manager can classify it. |
 
 ## A colour-vision theme
 

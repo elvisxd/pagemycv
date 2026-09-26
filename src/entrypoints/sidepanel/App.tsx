@@ -11,7 +11,7 @@ import {
   Section,
   StateChip,
 } from '../../ui/components';
-import { MIN_PASSPHRASE, passphraseProblem } from '../../vault/crypto';
+import { MIN_PASSPHRASE } from '../../vault/crypto';
 
 function yearRange(start: string | null, end: string | null): string {
   const from = start ? start.slice(0, 4) : '';
@@ -29,12 +29,39 @@ export function App() {
   const [markdown, setMarkdown] = useState('');
   const [imported, setImported] = useState<string | null>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
+  const markdownRef = useRef<HTMLTextAreaElement>(null);
+  const importButtonRef = useRef<HTMLButtonElement>(null);
+  /**
+   * Only the newest request may write state.
+   *
+   * The first message of a session is slow: it wakes the service worker,
+   * creates the offscreen document, spawns the worker and loads SQLite. A
+   * refresh issued before an unlock can therefore settle after the one issued
+   * by the unlock, and the older answer then overwrites the newer one. The
+   * symptom is an unlocked vault showing an empty profile and offering to
+   * import a CV over the one already stored, which reads as data loss and
+   * invites the user to cause it for real.
+   */
+  const request = useRef(0);
 
   const refresh = useCallback(async () => {
+    const mine = ++request.current;
     const state = await sendVault('vault:state', undefined);
+    if (mine !== request.current) return;
+    if (state.status !== 'unlocked') {
+      setVault(state);
+      setProfile(null);
+      return;
+    }
+    // Fetch the profile BEFORE publishing the unlocked state. Setting the
+    // status first opens a window, as long as the profile query takes, in which
+    // the unlocked screen renders with no profile: it shows the fallback title
+    // and offers "Import your CV" over the CV already stored. Seeing that
+    // immediately after unlocking reads as data loss.
+    const view = await sendVault('vault:profile', undefined);
+    if (mine !== request.current) return;
+    setProfile(view);
     setVault(state);
-    if (state.status === 'unlocked') setProfile(await sendVault('vault:profile', undefined));
-    else setProfile(null);
   }, []);
 
   useEffect(() => {
@@ -49,12 +76,31 @@ export function App() {
     if (vault && vault.status !== 'unlocked') passphraseRef.current?.focus();
   }, [vault]);
 
+  // Opening the import view unmounts the button that opened it, so focus falls
+  // to the body and a keyboard user has to tab from the top of the panel.
+  // Closing it does the same in reverse.
+  useEffect(() => {
+    if (showImport) markdownRef.current?.focus();
+    else importButtonRef.current?.focus();
+  }, [showImport]);
+
+  useEffect(() => {
+    if (!showImport) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowImport(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showImport]);
+
   // Keeps the auto-lock honest: the panel being open is not activity, but
   // using it is. Polls the state so an expiry is reflected without a reload.
   useEffect(() => {
     const timer = setInterval(() => {
+      const mine = ++request.current;
       sendVault('vault:state', undefined)
         .then((s) => {
+          if (mine !== request.current) return;
           setVault(s);
           if (s.status !== 'unlocked') setProfile(null);
         })
@@ -78,8 +124,15 @@ export function App() {
   };
 
   const lock = async () => {
-    await sendVault('vault:lock', undefined);
-    await refresh();
+    setError(null);
+    try {
+      await sendVault('vault:lock', undefined);
+      await refresh();
+    } catch (e) {
+      // Silence here would leave the panel showing an unlocked vault while the
+      // user believes they locked it.
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const importCv = async () => {
@@ -103,7 +156,28 @@ export function App() {
   if (!vault) {
     return (
       <Screen>
-        <Muted>Opening the vault…</Muted>
+        <Heading>PageMyCV</Heading>
+        <p role="status" aria-live="polite" style={{ color: 'var(--text-muted)', margin: 0 }}>
+          {error ? 'The vault could not be opened.' : 'Opening the vault…'}
+        </p>
+        {/* This screen used to render nothing but the spinner, so a failure on
+            the very first message left it there for good with the reason
+            captured in a variable nobody displayed. */}
+        {error ? (
+          <>
+            <ErrorNote>{error}</ErrorNote>
+            <div style={{ marginTop: 10 }}>
+              <Button
+                onClick={() => {
+                  setError(null);
+                  refresh().catch((e: Error) => setError(e.message));
+                }}
+              >
+                Try again
+              </Button>
+            </div>
+          </>
+        ) : null}
       </Screen>
     );
   }
@@ -139,6 +213,7 @@ export function App() {
           <input
             type="password"
             ref={passphraseRef}
+            autocomplete={creating ? 'new-password' : 'current-password'}
             value={passphrase}
             placeholder="Passphrase"
             aria-label="Passphrase"
@@ -155,10 +230,11 @@ export function App() {
             }}
           />
           <div style={{ marginTop: 10 }}>
-            <Button
-              type="submit"
-              disabled={busy || !passphrase || (creating && passphraseProblem(passphrase) !== null)}
-            >
+            {/* Not disabled on a short passphrase. A disabled submit button
+                also suppresses Enter, so the rule became unexplainable: the
+                button did nothing and said nothing. Let the submit through and
+                let the worker, which is the authority, say why it refused. */}
+            <Button type="submit" disabled={busy || !passphrase}>
               {busy ? 'Working…' : creating ? 'Create the vault' : 'Unlock'}
             </Button>
           </div>
@@ -189,6 +265,7 @@ export function App() {
               and links already stored.
             </p>
             <textarea
+              ref={markdownRef}
               value={markdown}
               data-testid="cv-markdown"
               aria-label="CV markdown"
@@ -217,11 +294,24 @@ export function App() {
         </Section>
       ) : (
         <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Button variant="quiet" onClick={() => setShowImport(true)}>
+          <Button
+            buttonRef={importButtonRef}
+            variant="quiet"
+            onClick={() => {
+              setImported(null);
+              setError(null);
+              setShowImport(true);
+            }}
+          >
             {p?.profile ? 'Re-import CV' : 'Import your CV'}
           </Button>
           {imported ? (
-            <span data-testid="import-result" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+            <span
+              data-testid="import-result"
+              role="status"
+              aria-live="polite"
+              style={{ color: 'var(--text-muted)', fontSize: 11 }}
+            >
               {imported}
             </span>
           ) : null}

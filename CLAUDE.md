@@ -53,6 +53,12 @@ and re-deriving them wastes a session.
 - Byte returns a flat map of string values. Never selectors, never actions.
 - Every AES-GCM call passes AAD binding the ciphertext to its row, column and
   schema version. A call without it is a bug, not a simplification.
+- Commands in the worker run one at a time, on a queue. Never await inside an
+  open transaction: the transaction belongs to the connection, not to the call.
+- `requireKey` returns a lease with a generation. Re-check it with `stillLeased`
+  after every await before using the key or emitting anything derived from it.
+- Passphrases are normalized to NFC before derivation, and the length rule uses
+  the same form. Skipping it locks a user out of their own vault.
 - The vault key is never persisted anywhere, including as a non-extractable
   CryptoKey in IndexedDB. That pattern is for device-bound session keys and would
   let anyone with the browser profile decrypt the CV without the passphrase.

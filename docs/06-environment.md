@@ -185,14 +185,21 @@ Three rules that the layout exists to enforce:
 Cheap static checks that enforce the invariants from `03-security.md`. Grep-level,
 deliberately, so they are impossible to misread.
 
+It strips comments before matching, so prose explaining an invariant cannot trip
+that invariant's own check, and it **fails when it cannot parse** rather than
+reporting success. It also prints which invariants it does and does not cover:
+claiming more than it enforces is worse than enforcing nothing.
+
 | Check | Fails when |
 |---|---|
-| Single fetch site | `fetch(` appears outside `src/byte/client.ts` |
-| No submit | `.submit()`, `type="submit"` clicks, or a synthetic Enter appears in `src/fill/` |
+| One network door | Any transport appears outside `src/byte/client.ts`: fetch, XHR, WebSocket, EventSource, sendBeacon, importScripts, RTCPeerConnection |
+| Never submit | `.submit()`, `.requestSubmit()`, a synthesized submit event, or a synthesized key press |
+| No dynamic code | `eval`, `new Function`, `import()`, a string given to a timer, `innerHTML` |
 | No sync storage | `chrome.storage.sync` appears anywhere |
-| No telemetry | Any known analytics package appears in the lockfile |
-| Permission drift | Required `host_permissions` differ from a committed allowlist |
-| Crypto containment | `crypto.subtle` appears outside `src/vault/crypto.ts` |
+| The key never persists | Any persistent store is written outside the worker, or a key is made extractable |
+| One door each | `crypto.subtle` outside the vault, SQLite outside the worker |
+| No telemetry | A known analytics package appears in `package.json` **or transitively in the lockfile** |
+| The manifest | A permission outside the allowlist, any `host_permissions`, or a CSP that allows a remote or unsafe script source |
 
 ## Environment variables
 

@@ -74,12 +74,18 @@ Built:
 - The sensitive field registry, fourteen fields, seeded empty
 - A read-only side panel, light and dark, following the system
 
-**Gate: passed.** `node tests/e2e/gate.cjs`, twelve checks, against a real
-browser launched twice over the same profile.
+**Gate: passed.** `node tests/e2e/gate.cjs`, nineteen checks, against a real
+browser launched twice over the same profile, run twenty times in a row without
+a failure.
 
 | Check | Result |
 |---|---|
-| Several panels opening at once reach the same state | pass |
+| Four panels opening at once reach the same state | pass |
+| A passphrase under the minimum is refused **by the worker** | pass |
+| A document that is not a CV is refused, and the profile survives | pass |
+| Every imported role is stored and rendered, count for count | pass |
+| Every sensitive field is listed and actually empty | pass |
+| The plaintext region IS on disk, so the encrypted city was really stored | pass |
 | Vault created from a passphrase of at least 12 characters | pass |
 | The real `cv.md` imported | 5 roles, 2 degrees, 2 links |
 | Experience visible after import | pass |
@@ -92,7 +98,7 @@ browser launched twice over the same profile.
 | The profile survived the restart | pass |
 | **No request left the extension origin** | pass |
 
-Plus 32 unit tests, including the one the AAD design exists for: a ciphertext
+Plus 81 unit tests, including the one the AAD design exists for: a ciphertext
 moved to another row or column fails to decrypt.
 
 Two corrections to the plan, found by building it:
