@@ -220,20 +220,12 @@ auth cookie that expires every three hours.
 
 ## CI
 
-```yaml
-# .github/workflows/ci.yml
-on: [push, pull_request]
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-```
+One job, in `.github/workflows/ci.yml`: install, `pnpm check`, `pnpm build`,
+then the phase gate against a real browser.
+
+The gate is in CI rather than only on a laptop because a gate that runs in one
+place rots. It reads a fixture CV at `tests/e2e/fixture-cv.md`, never anyone's
+real one, and takes the real file only when `PAGEMYCV_CV` points at it.
 
 Keep it to one job. A pipeline you do not read is a pipeline that goes red and
 stays red.

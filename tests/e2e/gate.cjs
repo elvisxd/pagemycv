@@ -3,15 +3,30 @@
 // Playwright cannot drive the real side panel surface, so the panel document is
 // opened as an ordinary page. Same document, same component tree, same
 // messaging. See docs/06-environment.md.
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
 const path = require('node:path');
 const fs = require('node:fs');
+
+// Resolve Playwright from this project first, then from a global install, so
+// the gate runs the same way on a contributor's machine and in CI.
+function loadPlaywright() {
+  for (const id of ['playwright', '/opt/node22/lib/node_modules/playwright']) {
+    try {
+      return require(id);
+    } catch {}
+  }
+  throw new Error('playwright is not installed: run pnpm install');
+}
+const { chromium } = loadPlaywright();
 
 const EXT = path.join(__dirname, '../../.output/chrome-mv3');
 const PROFILE = path.join(__dirname, '../../.e2e-profile');
 const PASSPHRASE = 'correct horse battery staple';
-const CV = fs.existsSync('/home/user/byte/perfil/cv.md')
-  ? fs.readFileSync('/home/user/byte/perfil/cv.md', 'utf8')
+
+// The real CV when this checkout sits next to Byte, otherwise a fixture with
+// the same shape. The gate must not depend on one person's filesystem.
+const REAL_CV = process.env.PAGEMYCV_CV ?? '/home/user/byte/perfil/cv.md';
+const CV = fs.existsSync(REAL_CV)
+  ? fs.readFileSync(REAL_CV, 'utf8')
   : fs.readFileSync(path.join(__dirname, 'fixture-cv.md'), 'utf8');
 
 const results = {};
@@ -25,7 +40,8 @@ function check(name, pass, detail) {
 
 async function launch() {
   const ctx = await chromium.launchPersistentContext(PROFILE, {
-    executablePath: '/opt/pw-browsers/chromium',
+    // Let Playwright find its own browser unless one is pinned for this machine.
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
     headless: true,
     args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--no-sandbox'],
   });
