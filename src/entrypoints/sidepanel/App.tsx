@@ -11,7 +11,7 @@ import {
   Section,
   StateChip,
 } from '../../ui/components';
-import { MIN_PASSPHRASE, passphraseProblem } from '../../vault/crypto';
+import { MIN_PASSPHRASE } from '../../vault/crypto';
 
 function yearRange(start: string | null, end: string | null): string {
   const from = start ? start.slice(0, 4) : '';
@@ -29,12 +29,37 @@ export function App() {
   const [markdown, setMarkdown] = useState('');
   const [imported, setImported] = useState<string | null>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
+  /**
+   * Only the newest request may write state.
+   *
+   * The first message of a session is slow: it wakes the service worker,
+   * creates the offscreen document, spawns the worker and loads SQLite. A
+   * refresh issued before an unlock can therefore settle after the one issued
+   * by the unlock, and the older answer then overwrites the newer one. The
+   * symptom is an unlocked vault showing an empty profile and offering to
+   * import a CV over the one already stored, which reads as data loss and
+   * invites the user to cause it for real.
+   */
+  const request = useRef(0);
 
   const refresh = useCallback(async () => {
+    const mine = ++request.current;
     const state = await sendVault('vault:state', undefined);
+    if (mine !== request.current) return;
+    if (state.status !== 'unlocked') {
+      setVault(state);
+      setProfile(null);
+      return;
+    }
+    // Fetch the profile BEFORE publishing the unlocked state. Setting the
+    // status first opens a window, as long as the profile query takes, in which
+    // the unlocked screen renders with no profile: it shows the fallback title
+    // and offers "Import your CV" over the CV already stored. Seeing that
+    // immediately after unlocking reads as data loss.
+    const view = await sendVault('vault:profile', undefined);
+    if (mine !== request.current) return;
+    setProfile(view);
     setVault(state);
-    if (state.status === 'unlocked') setProfile(await sendVault('vault:profile', undefined));
-    else setProfile(null);
   }, []);
 
   useEffect(() => {
@@ -53,8 +78,10 @@ export function App() {
   // using it is. Polls the state so an expiry is reflected without a reload.
   useEffect(() => {
     const timer = setInterval(() => {
+      const mine = ++request.current;
       sendVault('vault:state', undefined)
         .then((s) => {
+          if (mine !== request.current) return;
           setVault(s);
           if (s.status !== 'unlocked') setProfile(null);
         })
@@ -155,10 +182,11 @@ export function App() {
             }}
           />
           <div style={{ marginTop: 10 }}>
-            <Button
-              type="submit"
-              disabled={busy || !passphrase || (creating && passphraseProblem(passphrase) !== null)}
-            >
+            {/* Not disabled on a short passphrase. A disabled submit button
+                also suppresses Enter, so the rule became unexplainable: the
+                button did nothing and said nothing. Let the submit through and
+                let the worker, which is the authority, say why it refused. */}
+            <Button type="submit" disabled={busy || !passphrase}>
               {busy ? 'Working…' : creating ? 'Create the vault' : 'Unlock'}
             </Button>
           </div>

@@ -41,6 +41,19 @@ let opening: Promise<Db> | null = null;
 /** Never written anywhere. Lost when this worker dies, which is intended. */
 let key: CryptoKey | null = null;
 let locksAt = 0;
+/**
+ * Bumped every time the vault locks. An operation that captured the key before
+ * a lock holds a local reference that nulling `key` cannot reach, so it would
+ * happily finish decrypting and hand plaintext back after the vault reported
+ * itself locked. Every await that sits between capturing the key and using its
+ * output re-checks this.
+ */
+let keyGeneration = 0;
+
+interface KeyLease {
+  readonly key: CryptoKey;
+  readonly generation: number;
+}
 
 const uid = () => crypto.randomUUID();
 const now = () => Date.now();
@@ -54,27 +67,44 @@ function openDatabase(): Promise<Db> {
       throw new Error('opfs-sahpool is unavailable in this context');
     }
     const pool = await sqlite3.installOpfsSAHPoolVfs({ name: POOL_NAME });
-    db = new pool.OpfsSAHPoolDb(DB_PATH);
-    migrate();
+    // Migrate against a local handle and publish it only on success. Assigning
+    // `db` first would leave an un-migrated handle in place that the `if (db)`
+    // fast path hands back forever, so one failed migration would brick the
+    // extension for the life of the offscreen document.
+    const handle = new pool.OpfsSAHPoolDb(DB_PATH);
+    // Durability over speed. The default (NORMAL) lets a commit return before
+    // the bytes are flushed to the synchronous access handle, so a browser that
+    // closes right after a write can lose it. This is a vault: a commit that
+    // reports success and then disappears is the worst possible failure.
+    handle.exec('PRAGMA synchronous = FULL');
+    migrate(handle);
+    db = handle;
     return db;
   })().catch((err) => {
     // A failed open must not poison every later attempt.
+    db = null;
     opening = null;
     throw err;
   });
   return opening;
 }
 
-function migrate(): void {
-  const version = db.selectValue('PRAGMA user_version') as number;
+function migrate(handle: Db): void {
+  const version = handle.selectValue('PRAGMA user_version') as number;
+  if (version > 1) {
+    throw new Error(`this vault was written by a newer version (schema ${version})`);
+  }
   if (version < 1) {
-    db.exec('BEGIN');
+    handle.exec('BEGIN');
     try {
-      db.exec(INITIAL_SQL);
-      db.exec('PRAGMA user_version = 1');
-      db.exec('COMMIT');
+      handle.exec(INITIAL_SQL);
+      handle.exec('PRAGMA user_version = 1');
+      handle.exec('COMMIT');
     } catch (err) {
-      db.exec('ROLLBACK');
+      // A rollback that itself throws must not replace the real error.
+      try {
+        handle.exec('ROLLBACK');
+      } catch {}
       throw err;
     }
   }
@@ -101,6 +131,7 @@ function lockVault(why: string): void {
   if (!key) return;
   key = null;
   locksAt = 0;
+  keyGeneration++;
   if (db) log('lock', why);
 }
 
@@ -118,11 +149,22 @@ function extendLock(): void {
   if (key) locksAt = now() + AUTO_LOCK_MS;
 }
 
-function requireKey(): CryptoKey {
+function requireKey(): KeyLease {
   autoLockIfDue();
   if (!key) throw new Error('vault is locked');
   extendLock();
-  return key;
+  return { key, generation: keyGeneration };
+}
+
+/**
+ * Call after every await before using the leased key or emitting anything
+ * derived from it. Throws if the vault locked in the meantime.
+ */
+function stillLeased(lease: KeyLease): CryptoKey {
+  if (!key || lease.generation !== keyGeneration) {
+    throw new Error('the vault locked while this was running, so nothing was returned');
+  }
+  return lease.key;
 }
 
 async function createVault(passphrase: string): Promise<VaultState> {
@@ -181,7 +223,7 @@ async function unlockVault(passphrase: string): Promise<VaultState> {
   return state();
 }
 
-async function readContact(k: CryptoKey): Promise<ProfileView['contact']> {
+async function readContact(lease: KeyLease): Promise<ProfileView['contact']> {
   const row = rows<Record<string, Uint8Array | string | null>>(
     'SELECT email_enc, phone_enc, city_enc, region, country FROM contact WHERE id = 1',
   )[0];
@@ -189,7 +231,9 @@ async function readContact(k: CryptoKey): Promise<ProfileView['contact']> {
   const open = async (column: string): Promise<string | null> => {
     const blob = row[column];
     if (!blob || typeof blob === 'string') return null;
-    return decryptValue(k, new Uint8Array(blob), 'contact:1', column);
+    // stillLeased before each decrypt, so a lock landing mid-read stops the
+    // next one rather than finishing the set and posting plaintext out.
+    return decryptValue(stillLeased(lease), new Uint8Array(blob), 'contact:1', column);
   };
   return {
     email: await open('email_enc'),
@@ -201,7 +245,7 @@ async function readContact(k: CryptoKey): Promise<ProfileView['contact']> {
 }
 
 async function profileView(): Promise<ProfileView> {
-  const k = requireKey();
+  const lease = requireKey();
   const profileRow = rows<Record<string, string | null>>(
     'SELECT legal_first, legal_last, preferred_name, headline, summary FROM profile WHERE id = 1',
   )[0];
@@ -215,7 +259,7 @@ async function profileView(): Promise<ProfileView> {
           summary: profileRow.summary ?? null,
         }
       : null,
-    contact: await readContact(k),
+    contact: await readContact(lease),
     work: rows<Record<string, string | number | null>>(
       'SELECT id, employer, title, location, is_remote, started_on, ended_on, description, sort_order FROM work_history ORDER BY sort_order',
     ).map((r) => ({
@@ -265,9 +309,29 @@ async function profileView(): Promise<ProfileView> {
 async function importCv(
   markdown: string,
 ): Promise<{ imported: true; counts: Record<string, number> }> {
-  const k = requireKey();
+  const lease = requireKey();
   const cv = parseCvMarkdown(markdown);
+
+  // This operation deletes every role, degree and link before inserting. If the
+  // text did not parse into anything, that is a wipe with nothing to show for
+  // it, so refuse before touching the database. The panel also blocks an empty
+  // box, but the panel is not the authority: the same reasoning that puts the
+  // passphrase minimum down here applies to the destructive operation.
+  if (cv.work.length === 0 && cv.education.length === 0) {
+    throw new Error(
+      'that does not look like a CV: no experience or education was found, so nothing was changed',
+    );
+  }
+
   const t = now();
+  // Encrypt BEFORE opening the transaction. An await between BEGIN and COMMIT
+  // publishes an open transaction to anything else that runs in the meantime,
+  // and the transaction belongs to the connection rather than to this call.
+  const cityEnc = cv.city
+    ? await encryptValue(stillLeased(lease), cv.city, 'contact:1', 'city_enc')
+    : null;
+  stillLeased(lease);
+
   db.exec('BEGIN');
   try {
     db.exec('DELETE FROM work_history');
@@ -278,15 +342,20 @@ async function importCv(
             VALUES (1, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               legal_first = excluded.legal_first, legal_last = excluded.legal_last,
-              headline = excluded.headline, summary = excluded.summary, updated_at = excluded.updated_at`,
+              -- COALESCE, not excluded.*: a re-import of a reformatted CV that
+              -- happens not to expose a headline must not erase the stored one.
+              headline = COALESCE(excluded.headline, profile.headline),
+              summary = COALESCE(excluded.summary, profile.summary),
+              updated_at = excluded.updated_at`,
       bind: [cv.legalFirst, cv.legalLast, cv.headline, cv.summary, t, t],
     });
-    const cityEnc = cv.city ? await encryptValue(k, cv.city, 'contact:1', 'city_enc') : null;
     db.exec({
       sql: `INSERT INTO contact (id, city_enc, region, country, created_at, updated_at)
             VALUES (1, ?, ?, 'US', ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-              city_enc = excluded.city_enc, region = excluded.region, updated_at = excluded.updated_at`,
+              city_enc = COALESCE(excluded.city_enc, contact.city_enc),
+              region = COALESCE(excluded.region, contact.region),
+              updated_at = excluded.updated_at`,
       bind: [cityEnc, cv.region, t, t],
     });
     cv.work.forEach((w, i) => {
@@ -323,7 +392,9 @@ async function importCv(
     });
     db.exec('COMMIT');
   } catch (err) {
-    db.exec('ROLLBACK');
+    try {
+      db.exec('ROLLBACK');
+    } catch {}
     throw err;
   }
   log('import_cv', `${cv.work.length} roles, ${cv.education.length} degrees`);
@@ -364,13 +435,30 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
   },
 };
 
-self.onmessage = async (event: MessageEvent) => {
-  const { id, cmd, payload } = event.data ?? {};
+/**
+ * Commands run one at a time, chained onto this tail.
+ *
+ * SQLite's oo1 handle is one connection and BEGIN is global state on it, not a
+ * per-caller object. Every await inside a handler is a yield point, so without
+ * this queue a second command could execute SQL inside the first one's open
+ * transaction, and its ROLLBACK would undo work that was never its own.
+ *
+ * The tail always resolves: a failed command settles its own reply and must not
+ * stop the ones behind it.
+ */
+let queue: Promise<void> = Promise.resolve();
+
+async function run(id: number, cmd: string, payload: Record<string, string>): Promise<void> {
   try {
     const handler = handlers[cmd];
     if (!handler) throw new Error(`unknown command: ${cmd}`);
-    self.postMessage({ id, ok: true, value: await handler(payload ?? {}) });
+    self.postMessage({ id, ok: true, value: await handler(payload) });
   } catch (err) {
     self.postMessage({ id, ok: false, error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+self.onmessage = (event: MessageEvent) => {
+  const { id, cmd, payload } = event.data ?? {};
+  queue = queue.then(() => run(id, cmd, payload ?? {}));
 };

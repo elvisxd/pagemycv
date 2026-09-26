@@ -37,7 +37,9 @@ export const PAD_BLOCK = 64;
 export const MIN_PASSPHRASE = 12;
 
 export function passphraseProblem(passphrase: string): string | null {
-  if (passphrase.length < MIN_PASSPHRASE) {
+  // Measured on the same normalized form the key is derived from, so the rule
+  // and the derivation never disagree about what the passphrase is.
+  if (passphrase.normalize('NFC').length < MIN_PASSPHRASE) {
     return `the passphrase needs at least ${MIN_PASSPHRASE} characters`;
   }
   return null;
@@ -56,7 +58,13 @@ export function randomSalt(): Uint8Array<ArrayBuffer> {
 
 export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
   const raw = await argon2id({
-    password: passphrase,
+    // Normalize first. "contraseña" typed on macOS often arrives decomposed
+    // (n + combining tilde) and on Linux or Windows composed (ñ). Those are
+    // different byte sequences, so Argon2id derives different keys from what
+    // the user believes is one passphrase: the vault opens on the machine that
+    // created it and reports "wrong passphrase" everywhere else, with no
+    // recovery because the key is never stored. NFC is the composed form.
+    password: passphrase.normalize('NFC'),
     salt,
     ...KDF,
     outputType: 'binary',

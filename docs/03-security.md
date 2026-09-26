@@ -154,7 +154,8 @@ want to search your own application history without unlocking the vault.
 | | |
 |---|---|
 | Cipher | AES-GCM, 256-bit, via WebCrypto |
-| Key derivation | **Argon2id**, `m = 19 MiB`, `t = 2`, `p = 1`, the current OWASP configuration |
+| Key derivation | **Argon2id**, `m = 19 MiB`, `t = 2`, `p = 1`, the current OWASP configuration, asserted against literals |
+| Passphrase encoding | Normalized to NFC before derivation |
 | Argon2 implementation | `hash-wasm`, about 11 KB gzipped. `@openpgp/argon2id` is not published to npm. |
 | Key storage | **Never.** Derived with `extractable: false`, held in the offscreen document for the session. |
 | IV | 12 random bytes per value, stored alongside the ciphertext |
@@ -208,6 +209,42 @@ work authorization status, where the set of possible values is small and each
 has a distinct length, the length **is** the value.
 
 Pad every sensitive column to a fixed block before encrypting.
+
+### The passphrase is normalized before it becomes a key
+
+`contraseña` typed on macOS often arrives decomposed, as `n` plus a combining
+tilde, and composed on Linux and Windows. Those are different byte sequences, so
+Argon2id derives different keys from what the user believes is one passphrase.
+The vault would open on the machine that created it and report **wrong
+passphrase** everywhere else, with no recovery, because the key is never stored.
+
+`deriveKey` normalizes to NFC, and `passphraseProblem` measures the same form,
+so the length rule and the derivation can never disagree about what the
+passphrase is.
+
+### Locking is immediate, even mid-operation
+
+`requireKey` hands out a lease carrying a generation number, and locking bumps
+that number. Every await between taking the key and using its output re-checks
+the lease, so an operation in flight when the vault locks fails instead of
+finishing. Without this, nulling the key could not reach the local reference an
+operation already held: a profile read would decrypt and return the email, phone
+and city **after** the vault had reported itself locked.
+
+### Commands run one at a time
+
+SQLite's handle is one connection and `BEGIN` is global state on it, not a
+per-caller object. Every await inside a handler is a yield point, so a second
+command could execute inside the first one's open transaction and its rollback
+would undo work that was never its own. Commands are chained onto a queue, and
+`importCv` now encrypts before opening its transaction so the transaction body
+is fully synchronous.
+
+### Writes are flushed before they are acknowledged
+
+`PRAGMA synchronous = FULL`. The default lets a commit return before the bytes
+reach the file. For a vault, a commit that reports success and then disappears
+is the worst available failure.
 
 ### The key never gets persisted, including as a CryptoKey
 

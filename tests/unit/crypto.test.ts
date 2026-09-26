@@ -5,6 +5,8 @@ import {
   decryptValue,
   deriveKey,
   encryptValue,
+  KDF,
+  KDF_ID,
   MIN_PASSPHRASE,
   makeVerifier,
   PAD_BLOCK,
@@ -130,5 +132,50 @@ describe('passphrase strength', () => {
   it('measures characters, not words', () => {
     expect(passphraseProblem('a'.repeat(MIN_PASSPHRASE))).toBeNull();
     expect(passphraseProblem('a'.repeat(MIN_PASSPHRASE - 1))).toMatch(/at least/);
+  });
+});
+
+// The parameters below are asserted against literals on purpose. Comparing
+// them to the constants they describe would make the test pass for any value,
+// and these two numbers are the entire security argument for choosing Argon2id.
+describe('the security parameters are pinned', () => {
+  it('uses the OWASP Argon2id configuration', () => {
+    expect(KDF).toEqual({ memorySize: 19456, iterations: 2, parallelism: 1, hashLength: 32 });
+  });
+
+  it('names Argon2id as the derivation, not a fallback', () => {
+    expect(KDF_ID).toBe('argon2id');
+  });
+
+  it('requires twelve characters', () => {
+    expect(MIN_PASSPHRASE).toBe(12);
+    expect(passphraseProblem('elevenchars')).toMatch(/at least/);
+    expect(passphraseProblem('twelvechars!')).toBeNull();
+  });
+
+  it('binds a ciphertext to row, then column, then version, in that order', () => {
+    expect(new TextDecoder().decode(aad('contact:1', 'city_enc'))).toBe('contact:1.city_enc.1');
+  });
+});
+
+// A passphrase is what the user typed, not how their keyboard encoded it.
+describe('Unicode normalization', () => {
+  it('opens with the same passphrase in either normal form', async () => {
+    const s = randomSalt();
+    const composed = 'contraseña muy larga'.normalize('NFC');
+    const decomposed = 'contraseña muy larga'.normalize('NFD');
+    expect(composed).not.toBe(decomposed);
+
+    const written = await deriveKey(composed, s);
+    const blob = await encryptValue(written, 'Orlando', 'contact:1', 'city_enc');
+    const read = await deriveKey(decomposed, s);
+    await expect(decryptValue(read, blob, 'contact:1', 'city_enc')).resolves.toBe('Orlando');
+  }, 120_000);
+
+  it('counts length after normalizing, so the rule and the key agree', () => {
+    // Twelve characters composed, thirteen code units decomposed.
+    const decomposed = 'contraseñaX'.normalize('NFD');
+    expect(decomposed.length).toBeGreaterThan(11);
+    expect(passphraseProblem(decomposed)).toMatch(/at least/);
   });
 });
