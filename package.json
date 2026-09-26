@@ -5,6 +5,7 @@
   "type": "module",
   "description": "A local-first browser bot that fills job application forms from your own CV.",
   "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
   "dependencies": {
     "@radix-ui/colors": "^3.0.0",
     "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
