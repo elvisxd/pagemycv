@@ -7,7 +7,7 @@
 // to delegate. Both were confirmed in a real browser, see spikes/phase-0.
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { parseCvMarkdown } from '../import/cv-markdown';
-import { SENSITIVE_FIELDS, sensitiveByKey } from '../sensitive/registry';
+import { SENSITIVE_FIELDS } from '../sensitive/registry';
 import {
   checkVerifier,
   decryptValue,
@@ -307,25 +307,6 @@ async function importCv(
     imported: true,
     counts: { work: cv.work.length, education: cv.education.length, links: cv.links.length },
   };
-}
-
-/** Stores a sensitive value. Reading one back always goes through a confirmation. */
-export async function setSensitive(
-  dbKey: CryptoKey,
-  fieldKey: string,
-  value: string,
-): Promise<void> {
-  const def = sensitiveByKey(fieldKey);
-  if (!def) throw new Error(`not a sensitive field: ${fieldKey}`);
-  const row = rows<{ id: string }>('SELECT id FROM sensitive_value WHERE key = ?', [fieldKey])[0];
-  if (!row) throw new Error(`sensitive field missing from registry: ${fieldKey}`);
-  const blob = await encryptValue(dbKey, value, `sensitive:${row.id}`, 'value_enc', {
-    padded: def.padded,
-  });
-  db.exec({
-    sql: 'UPDATE sensitive_value SET value_enc = ?, updated_at = ? WHERE id = ?',
-    bind: [blob, now(), row.id],
-  });
 }
 
 const handlers: Record<string, (payload: Record<string, string>) => Promise<unknown>> = {

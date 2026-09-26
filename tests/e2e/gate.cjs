@@ -40,7 +40,11 @@ function check(name, pass, detail) {
 
 async function launch() {
   const ctx = await chromium.launchPersistentContext(PROFILE, {
-    // Let Playwright find its own browser unless one is pinned for this machine.
+    // 'chromium' selects the full browser. The default headless shell cannot
+    // load extensions at all, so without this the service worker never starts
+    // and every check below times out waiting for it.
+    channel: 'chromium',
+    // Only pinned when a machine needs a specific binary; CI uses Playwright's.
     ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
     headless: true,
     args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--no-sandbox'],
@@ -53,7 +57,14 @@ async function launch() {
     }
   });
   let [sw] = ctx.serviceWorkers();
-  if (!sw) sw = await ctx.waitForEvent('serviceworker', { timeout: 30000 });
+  if (!sw) {
+    sw = await ctx.waitForEvent('serviceworker', { timeout: 60000 }).catch(() => {
+      throw new Error(
+        'the extension service worker never started. A headless shell cannot load ' +
+          'extensions: launch with channel "chromium".',
+      );
+    });
+  }
   const id = sw.url().split('/')[2];
   const page = await ctx.newPage();
   await page.goto(`chrome-extension://${id}/sidepanel.html`);
