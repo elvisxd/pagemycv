@@ -11,6 +11,7 @@ import {
   Section,
   StateChip,
 } from '../../ui/components';
+import { MIN_PASSPHRASE, passphraseProblem } from '../../vault/crypto';
 
 function yearRange(start: string | null, end: string | null): string {
   const from = start ? start.slice(0, 4) : '';
@@ -126,7 +127,7 @@ export function App() {
         <Heading>PageMyCV</Heading>
         <Muted>
           {creating
-            ? 'Choose a passphrase. It is never stored, so it cannot be recovered and it cannot be read off this machine.'
+            ? `Choose a passphrase of at least ${MIN_PASSPHRASE} characters. It is never stored, so it cannot be recovered and it cannot be read off this machine.`
             : 'Locked. Your CV stays encrypted until you unlock it.'}
         </Muted>
         <form
@@ -154,7 +155,10 @@ export function App() {
             }}
           />
           <div style={{ marginTop: 10 }}>
-            <Button type="submit" disabled={busy || !passphrase}>
+            <Button
+              type="submit"
+              disabled={busy || !passphrase || (creating && passphraseProblem(passphrase) !== null)}
+            >
               {busy ? 'Working…' : creating ? 'Create the vault' : 'Unlock'}
             </Button>
           </div>

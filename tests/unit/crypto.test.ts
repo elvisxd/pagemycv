@@ -5,8 +5,10 @@ import {
   decryptValue,
   deriveKey,
   encryptValue,
+  MIN_PASSPHRASE,
   makeVerifier,
   PAD_BLOCK,
+  passphraseProblem,
   randomSalt,
 } from '../../src/vault/crypto';
 
@@ -113,4 +115,20 @@ describe('verifier', () => {
     const wrong = await deriveKey('not the passphrase', salt);
     await expect(checkVerifier(wrong, blob)).resolves.toBe(false);
   }, 60_000);
+});
+
+describe('passphrase strength', () => {
+  it('refuses a passphrase Argon2id cannot save', () => {
+    expect(passphraseProblem('short')).toMatch(/at least/);
+    expect(passphraseProblem('')).toMatch(/at least/);
+  });
+
+  it('accepts a memorable phrase', () => {
+    expect(passphraseProblem('correct horse battery staple')).toBeNull();
+  });
+
+  it('measures characters, not words', () => {
+    expect(passphraseProblem('a'.repeat(MIN_PASSPHRASE))).toBeNull();
+    expect(passphraseProblem('a'.repeat(MIN_PASSPHRASE - 1))).toMatch(/at least/);
+  });
 });

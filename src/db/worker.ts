@@ -16,6 +16,7 @@ import {
   KDF,
   KDF_ID,
   makeVerifier,
+  passphraseProblem,
   randomSalt,
 } from '../vault/crypto';
 import INITIAL_SQL from './migrations/001_initial.sql?raw';
@@ -125,6 +126,11 @@ function requireKey(): CryptoKey {
 }
 
 async function createVault(passphrase: string): Promise<VaultState> {
+  // Enforced here rather than only in the panel, because the panel is not the
+  // authority and a vault created weak can never be strengthened afterwards
+  // without re-encrypting everything.
+  const problem = passphraseProblem(passphrase);
+  if (problem) throw new Error(problem);
   await openDatabase();
   if ((db.selectValue('SELECT count(*) FROM vault') as number) > 0) {
     throw new Error('a vault already exists');

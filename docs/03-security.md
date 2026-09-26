@@ -160,6 +160,7 @@ want to search your own application history without unlocking the vault.
 | IV | 12 random bytes per value, stored alongside the ciphertext |
 | Additional authenticated data | `rowId ‖ columnName ‖ schemaVersion`, tested |
 | Auto-lock | 15 minutes idle |
+| Minimum passphrase | 12 characters, enforced in the worker, not only the panel |
 
 ### Why Argon2id and not PBKDF2
 

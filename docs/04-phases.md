@@ -68,17 +68,19 @@ Built:
   schema version
 - Argon2id at the OWASP configuration, derived with `extractable: false`, held
   only in the offscreen document
-- Lock, unlock, and a fifteen minute idle auto-lock
+- Lock, unlock, a twelve character minimum passphrase, and a fifteen minute
+  idle auto-lock
 - Import from `perfil/cv.md`, parsed into structured rows
 - The sensitive field registry, fourteen fields, seeded empty
 - A read-only side panel, light and dark, following the system
 
-**Gate: passed.** `node tests/e2e/gate.cjs`, eleven checks, against a real
+**Gate: passed.** `node tests/e2e/gate.cjs`, twelve checks, against a real
 browser launched twice over the same profile.
 
 | Check | Result |
 |---|---|
-| Vault created from a passphrase | pass |
+| Several panels opening at once reach the same state | pass |
+| Vault created from a passphrase of at least 12 characters | pass |
 | The real `cv.md` imported | 5 roles, 2 degrees, 2 links |
 | Experience visible after import | pass |
 | Sensitive fields listed, all empty | pass |

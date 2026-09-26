@@ -25,6 +25,24 @@ const SALT_BYTES = 16;
 /** Low-entropy values are padded so ciphertext length stops revealing them. */
 export const PAD_BLOCK = 64;
 
+/**
+ * The shortest passphrase the vault will accept.
+ *
+ * Argon2id buys roughly three orders of magnitude against a GPU, which is a
+ * great deal and still nothing against a four character passphrase: the whole
+ * space is searched regardless of how slow each guess is. Twelve is the length
+ * at which a memorable phrase of three or four words starts to be plausible,
+ * and it is what the lock screen asks for.
+ */
+export const MIN_PASSPHRASE = 12;
+
+export function passphraseProblem(passphrase: string): string | null {
+  if (passphrase.length < MIN_PASSPHRASE) {
+    return `the passphrase needs at least ${MIN_PASSPHRASE} characters`;
+  }
+  return null;
+}
+
 const enc = new TextEncoder();
 
 /** WebCrypto wants a view over a plain ArrayBuffer, never a shared one. */
