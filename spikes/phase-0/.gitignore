@@ -1,0 +1,8 @@
+node_modules/
+profile/
+ext/index.mjs
+ext/index.d.mts
+ext/node.mjs
+ext/sqlite3.wasm
+ext/sqlite3-opfs-async-proxy.js
+ext/sqlite3-worker1.mjs

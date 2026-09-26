@@ -1,0 +1,21 @@
+{
+  "browser": "Chromium 141.0.7390.37",
+  "date": "2026-09-26",
+  "spike1_offscreen_WORKERS": { "accepted": true },
+  "spike1b_service_worker_limits": {
+    "WorkerConstructorPresent": false,
+    "createSyncAccessHandlePresent": false,
+    "getDirectoryPresent": true
+  },
+  "spike2_sahpool_persistence": {
+    "sqliteVersion": "3.53.4",
+    "vfs": "opfs-sahpool",
+    "crossOriginIsolated": false,
+    "wroteInRun1": "written-in-run-1",
+    "readAfterRestart": true,
+    "rowCount": 1
+  },
+  "spike4_loopback_fetch": { "ok": true, "status": 200, "caveat": "Chrome 141; LNA enforced from 142" },
+  "spike5_cryptokey_in_storage_session": { "roundTrips": false, "typeSeen": "object" },
+  "aad_mitigation": { "decryptsInOwnPosition": true, "decryptsWhenMoved": false }
+}

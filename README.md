@@ -10,9 +10,10 @@ PageMyCV is the browser half of [Byte](https://github.com/elvisxd/byte). Byte fi
 the job, scores it against your profile and writes the text. PageMyCV is the hand
 that types it into the form and then stops.
 
-**Status: planning.** No code yet. This repository currently holds the design,
-the security model and the phase plan. Everything here is meant to be argued
-with before a line is written.
+**Status: planning, with Phase 0 verified.** No product code yet. This
+repository holds the design, the security model, the phase plan, and a
+[spike harness](spikes/phase-0/) that answered four of the five architectural
+unknowns in a real browser rather than on paper.
 
 ---
 
@@ -103,7 +104,8 @@ The risk lands on your account, not on this project. See
 | [`07-design.md`](docs/07-design.md) | Palette, typography, components |
 | [`08-mcp-and-skills.md`](docs/08-mcp-and-skills.md) | MCP servers and repository skills |
 | [`09-ats.md`](docs/09-ats.md) | Per-ATS field maps, selectors and honeypots |
-| [`DECISIONS.md`](docs/DECISIONS.md) | Every open choice, in one list |
+| [`DECISIONS.md`](docs/DECISIONS.md) | Every choice made, why, and the one still open |
+| [`spikes/phase-0/`](spikes/phase-0/) | The verification harness and its results |
 
 ## License
 

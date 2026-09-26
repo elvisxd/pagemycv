@@ -37,35 +37,41 @@ These were my recommendations. Evidence beat them.
 | **A colour-vision theme** | About thirty lines of token override, and the highest-leverage accessibility feature available here |
 | **Padding low-entropy columns** | Ciphertext length reveals plaintext length. For work authorization status, the length is the value. |
 
-## Still open, and genuinely yours
+## Closed
 
-| # | Decision | Options | Mine |
-|---|---|---|---|
-| 1 | **Repository visibility** | Public, like Byte / Private until Phase 2 | **Public** ★ |
-| 2 | **Icon** | Caret in a field / Page with a caret / Bracket with a caret | **Caret in a field** ★ |
-| 3 | **Default theme** | Follow the system / Always dark | **Follow the system** ★ |
-| 4 | **Auto-lock** | 15 minutes idle / On browser close / Never | **15 minutes** ★ |
-| 5 | **First ATS** | Lever alone / Lever and Greenhouse together | **Both** ★ |
+The last five, decided 26 September 2026.
 
-- [ ] 1. Visibility: ______________
-- [ ] 2. Icon: ______________
-- [ ] 3. Theme: ______________
-- [ ] 4. Auto-lock: ______________
-- [ ] 5. First ATS: ______________
+| | Decision | Why |
+|---|---|---|
+| **Repository visibility** | **Public** | Same as Byte. The build history is the portfolio, and nothing here is a secret. |
+| **Icon** | **A caret in a field** | Says what the product does at 16 pixels, and matches the name |
+| **Default theme** | **Follow the system** | A browser panel should look like the browser |
+| **Auto-lock** | **15 minutes idle** | Long enough to fill several applications, short enough that a walk away is covered |
+| **First ATS** | **Lever and Greenhouse together** | Similar enough that the second is nearly free, and two data points stop the first adapter baking one ATS's habits into shared code |
 
-## Still unverified, and Phase 0's whole job
+## Answered by running it, not by reading
 
-Needs a real browser. See [`04-phases.md`](04-phases.md).
+Phase 0, on Chromium 141, 26 September 2026. Harness at
+[`spikes/phase-0/`](../spikes/phase-0/).
 
-- [ ] Does `chrome.offscreen` accept the reason `WORKERS` on current Chrome
-- [ ] Does `opfs-sahpool` survive a full browser restart
-- [ ] Are Workday's shadow roots open or closed, and does `chrome.dom` reach them
-- [ ] Can the extension fetch loopback under Chrome 142's Local Network Access rules
-- [ ] Does `chrome.storage.session` round-trip a non-extractable `CryptoKey`
+| | Answer |
+|---|---|
+| `chrome.offscreen` reason `WORKERS` | **Accepted.** No fallback needed. |
+| `opfs-sahpool` across a browser restart | **Persists.** |
+| The service worker's two blocks | **Both confirmed in the browser.** No `Worker` constructor, no `createSyncAccessHandle`. |
+| `chrome.storage.session` with a `CryptoKey` | **Does not round-trip.** Returns a plain object, silently. Key moves to the offscreen document. |
+| Loopback fetch from the extension | **Works on 141.** Re-check on 142, where Local Network Access is enforced. |
+| The AAD mitigation | **Proved.** Decrypts in place, fails when moved. |
 
-## Worth ten minutes before spending money
+## Still open
 
-- [ ] Search the Chrome Web Store by hand for the final name. Store search is
-      blocked to automated tools, so "nothing found" came from indexed search.
-- [ ] Confirm the domains at a registrar. Availability was inferred from DNS.
-- [ ] A trademark search, if this is ever monetised.
+One thing, and it is the only one that could still change the shape of the
+project.
+
+- [ ] **Are Workday's shadow roots open or closed?** Needs a real
+      `*.myworkdayjobs.com` application page. `chrome.dom.openOrClosedShadowRoot`
+      handles either, but a frame nested inside a shadow root is unreachable by
+      design. Every existing Workday automation used Playwright or the DevTools
+      protocol, which pierce shadow DOM natively, so none of them ever had to
+      answer this. A content script does not have that power.
+

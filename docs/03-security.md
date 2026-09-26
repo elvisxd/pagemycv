@@ -158,7 +158,8 @@ want to search your own application history without unlocking the vault.
 | Argon2 implementation | `@openpgp/argon2id`, under 7 KB gzipped with the WASM inlined |
 | Key storage | **Never.** Derived with `extractable: false`, held in the offscreen document for the session. |
 | IV | 12 random bytes per value, stored alongside the ciphertext |
-| Additional authenticated data | `rowId ‖ columnName ‖ schemaVersion` |
+| Additional authenticated data | `rowId ‖ columnName ‖ schemaVersion`, tested |
+| Auto-lock | 15 minutes idle |
 
 ### Why Argon2id and not PBKDF2
 
@@ -191,6 +192,14 @@ Passing `additionalData = utf8(rowId + "." + columnName + "." + schemaVersion)`
 on both encrypt and decrypt closes that. It costs nothing and it is the single
 highest-value line in this document.
 
+**Tested, not asserted.** The Phase 0 harness encrypts a value bound to one row,
+then tries to decrypt it as though it had been moved to another:
+
+| | |
+|---|---|
+| Decrypts in its own position | true |
+| Decrypts when moved | **false** |
+
 ### Length leaks, and the fix
 
 Ciphertext length reveals plaintext length. For a low-entropy column such as
@@ -209,10 +218,16 @@ the CV without ever knowing the passphrase. It would nullify the entire scheme.
 Derive per session. Hold it in the offscreen document, which is where the
 database already lives and which outlives the service worker.
 
-`chrome.storage.session` is the sanctioned place for session secrets, held in
-memory and never written to disk. **Whether it round-trips a non-extractable
-`CryptoKey` is unverified** and is a Phase 0 spike. If it does not, the offscreen
-document holds the key in a module variable, which is the fallback anyway.
+`chrome.storage.session` was the obvious candidate: held in memory, never
+written to disk. **It was tested and it does not work.** It accepts a
+`CryptoKey` without throwing and returns a plain object on read. No error, no
+warning, just a silently useless value.
+
+So the key lives in a module variable inside the offscreen document, which has
+no lifetime limit and already hosts the database. Storing the raw derived bytes
+in `chrome.storage.session` instead is not an option: it would forfeit
+non-extractability, which is the one thing that stops the key being swept into
+a log by accident. See [`spikes/phase-0/`](../spikes/phase-0/).
 
 ### Honest limits, stated rather than glossed
 

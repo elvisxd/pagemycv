@@ -21,37 +21,38 @@ Phase 0 can invalidate them.
 
 ## Phase 0 — Spikes
 
-Four throwaway tests. Every later phase rests on these, and each one is cheap
-now and expensive to discover later. Write them in a scratch directory and
-delete them afterwards.
+**Four of the five are done.** Run on Chromium 141.0.7390.37 on 26 September
+2026. The harness is committed at [`spikes/phase-0/`](../spikes/phase-0/) so
+every answer is one command away from being re-checked.
 
-1. **Does `chrome.offscreen` accept the reason `WORKERS`?** There is an
-   unconfirmed report of it being rejected at some point. If it is, fall back to
-   `BLOBS` or `DOM_SCRAPING` and note which.
-2. **Does `opfs-sahpool` survive a browser restart?** Write a row, quit Chrome
-   completely, reopen, read it back. Also kill the offscreen document mid-write
-   and confirm `forceReinitIfPreviouslyFailed` recovers the stale handles.
-3. **Can a content script reach Workday's fields?** Open a real
-   `*.myworkdayjobs.com` application. Check that
-   `document.querySelectorAll('[data-automation-id]')` returns nodes, and
-   whether any custom elements have a `shadowRoot` that is null while
-   `chrome.dom.openOrClosedShadowRoot` returns one. This is the single biggest
-   unknown in the project. No source answered it, because every existing
-   automation used Playwright, which sidesteps the question entirely.
-4. **Can the extension reach Byte on loopback?** Chrome 142 enforces Local
-   Network Access. Extensions are reported to be exempt. Confirm it with a real
-   fetch from the service worker to `http://127.0.0.1:8000/health`.
-5. **Does `chrome.storage.session` round-trip a non-extractable `CryptoKey`?**
-   IndexedDB is confirmed to; this is not. Test in real Chrome, never in a
-   polyfill, because `fake-indexeddb` cannot reproduce the real behaviour. If it
-   fails, the offscreen document holds the key in memory, which is the fallback
-   regardless.
+| # | Question | Answer |
+|---|---|---|
+| 1 | Does `chrome.offscreen` accept the reason `WORKERS`? | **Yes.** No fallback needed. |
+| 2 | Does `opfs-sahpool` survive a full browser restart? | **Yes.** Written in one run, read back in the next against the same profile. |
+| 3 | Are Workday's shadow roots open or closed? | **Open question.** Not runnable without a real application page. |
+| 4 | Can the extension fetch loopback? | **Yes on 141.** Local Network Access is enforced from 142, so re-run before relying on it. |
+| 5 | Does `chrome.storage.session` round-trip a `CryptoKey`? | **No.** It returns a plain object, silently. |
 
-**Gate.** All four answered in writing, in this document, with the answer and
-the date. If spike 3 shows closed shadow roots that `chrome.dom` cannot pierce,
-Phase 4 changes shape and you need to know that now.
+**The architecture is confirmed empirically, not just from specifications.**
+Inside the service worker, the `Worker` constructor is absent and
+`createSyncAccessHandle` is absent, while `navigator.storage.getDirectory` is
+present. The service worker can see the file system but can neither open a
+synchronous handle nor spawn a worker that could. The offscreen hop is
+mandatory.
 
----
+**Spike 5's failure changed a decision.** The vault key lives in a module
+variable in the offscreen document. `chrome.storage.session` accepts a
+`CryptoKey` without error and hands back a useless plain object, which is the
+worst kind of failure because nothing tells you.
+
+**Spike 3 is the one that still matters.** Every existing Workday automation
+used Playwright or the DevTools protocol, both of which pierce shadow DOM
+natively, so none of them ever had to answer it. A content script does not have
+that power. It needs a real `*.myworkdayjobs.com` page and it is the only
+remaining unknown that could change the shape of Phase 4.
+
+**Gate: passed for 1, 2, 4 and 5.** Phase 1 can start. Phase 4 cannot be
+planned in detail until spike 3 is answered.
 
 ## Phase 1 — The vault
 
@@ -78,6 +79,10 @@ asserts decryption **fails**, which is what proves the AAD is really there.
 ---
 
 ## Phase 2 — Fill Lever and Greenhouse, direct URLs only
+
+**Both, not Lever alone.** They are similar enough that the second is nearly
+free, and two data points stop the first adapter from hard-coding one ATS's
+habits into the shared code.
 
 The easy case, deliberately. Plain HTML, stable ids like `#first_name`, open job
 APIs, no anti-automation clause found.
