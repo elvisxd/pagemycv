@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/* Radix Colors. Light and dark ship as separate stylesheets and swap on a
+   class, which is the whole reason this project uses them: see docs/07-design.md */
+@import '@radix-ui/colors/gray.css';
+@import '@radix-ui/colors/gray-dark.css';
+@import '@radix-ui/colors/blue.css';
+@import '@radix-ui/colors/blue-dark.css';
+@import '@radix-ui/colors/orange.css';
+@import '@radix-ui/colors/orange-dark.css';
+@import '@radix-ui/colors/plum.css';
+@import '@radix-ui/colors/plum-dark.css';
+@import '@radix-ui/colors/red.css';
+@import '@radix-ui/colors/red-dark.css';
+
+@theme {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: light dark;
+
+  --bg: var(--gray-1);
+  --surface: var(--gray-2);
+  --surface-hover: var(--gray-3);
+  --border: var(--gray-6);
+  --text: var(--gray-12);
+  --text-muted: var(--gray-11);
+
+  /* The brand is neutral on purpose. Every hue in this interface means a state,
+     so spending one on branding would make status harder to read. */
+  --brand: var(--gray-12);
+  --brand-contrast: var(--gray-1);
+
+  --filled: var(--blue-11);
+  --filled-bg: var(--blue-3);
+  --review: var(--orange-11);
+  --review-bg: var(--orange-3);
+  --sensitive: var(--plum-11);
+  --sensitive-bg: var(--plum-3);
+  --skipped: var(--gray-11);
+  --skipped-bg: var(--gray-3);
+  --error: var(--red-11);
+  --error-bg: var(--red-3);
+}
+
+/* Radix keys its dark scales on .dark-theme. The class is applied from
+   sidepanel/main.tsx by watching prefers-color-scheme, because a media query
+   cannot select a rule set that is written against a class. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* WCAG 2.2 criterion 2.4.11: a focused row is never hidden, and never unstyled. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}

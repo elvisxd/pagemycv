@@ -54,29 +54,55 @@ remaining unknown that could change the shape of Phase 4.
 **Gate: passed for 1, 2, 4 and 5.** Phase 1 can start. Phase 4 cannot be
 planned in detail until spike 3 is answered.
 
-## Phase 1 — The vault
+## Phase 1 — The vault · done
 
-Security first, as designed. No network code exists in the extension at the end
-of this phase, not even unused.
+Security first, as designed. **There is no network code in the extension at the
+end of this phase, not even unused**, and a build-time check fails the build if
+any appears.
 
-- SQLite running through the offscreen chain, with migrations
-- The schema from `05-data.md`
+Built:
+
+- SQLite through the offscreen chain, with numbered SQL migrations
+- The eleven-table schema from `05-data.md`
 - Column-level AES-GCM with AAD binding each ciphertext to its row, column and
-  schema version, without which any ciphertext can be moved to any other column
-- Argon2id from `@openpgp/argon2id`, derived with `extractable: false`, held in
-  the offscreen document, never written anywhere
-- Lock and unlock, with an idle auto-lock
+  schema version
+- Argon2id at the OWASP configuration, derived with `extractable: false`, held
+  only in the offscreen document
+- Lock, unlock, a twelve character minimum passphrase, and a fifteen minute
+  idle auto-lock
 - Import from `perfil/cv.md`, parsed into structured rows
-- The sensitive field registry, seeded
-- Side panel showing the profile, read-only
+- The sensitive field registry, fourteen fields, seeded empty
+- A read-only side panel, light and dark, following the system
 
-**Gate.** Quit Chrome, reopen, unlock with the passphrase, see the profile. Then
-inspect the database file with the extension locked and confirm the sensitive
-columns are ciphertext. Two more tests: one asserting zero network calls in the
-whole bundle, and one that moves a ciphertext from one column to another and
-asserts decryption **fails**, which is what proves the AAD is really there.
+**Gate: passed.** `node tests/e2e/gate.cjs`, twelve checks, against a real
+browser launched twice over the same profile.
 
----
+| Check | Result |
+|---|---|
+| Several panels opening at once reach the same state | pass |
+| Vault created from a passphrase of at least 12 characters | pass |
+| The real `cv.md` imported | 5 roles, 2 degrees, 2 links |
+| Experience visible after import | pass |
+| Sensitive fields listed, all empty | pass |
+| A database file exists on disk | pass |
+| **An encrypted column never appears in plaintext** | pass |
+| An unencrypted column does appear, so the scan really reads the file | pass |
+| Locked again after a full browser restart | pass |
+| A wrong passphrase is refused | pass |
+| The profile survived the restart | pass |
+| **No request left the extension origin** | pass |
+
+Plus 32 unit tests, including the one the AAD design exists for: a ciphertext
+moved to another row or column fails to decrypt.
+
+Two corrections to the plan, found by building it:
+
+- **The Argon2 package name in the research was wrong.** `@openpgp/argon2id` is
+  not published to npm. The build uses `hash-wasm`, which is maintained, ships
+  Argon2id, and costs about 11 KB.
+- **`@webext-core/messaging` has no namespace option** for the extension
+  messenger, only for the page messenger. The two channels are kept apart by
+  key prefixes instead, which the gate confirms works.
 
 ## Phase 2 — Fill Lever and Greenhouse, direct URLs only
 

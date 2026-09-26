@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One job on purpose. A pipeline nobody reads is a pipeline that goes red and
+# stays red. See docs/06-environment.md.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Typecheck, lint, unit tests, and the invariant guard from
+      # docs/03-security.md, all in one command.
+      - run: pnpm check
+
+      - run: pnpm build
+
+      # The Phase 1 gate. It launches a real browser twice over one profile, so
+      # it is the only thing that can prove the vault survives a restart and
+      # that nothing leaves the extension origin. It runs against a fixture CV,
+      # never against anyone's real one.
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - run: node tests/e2e/gate.cjs

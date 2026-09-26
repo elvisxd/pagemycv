@@ -11,12 +11,12 @@ Every row below was re-checked against the current registry on 26 September
 | Package manager | pnpm | — |
 | Extension framework | **WXT** | Still the leading choice. Plasmo has shipped nothing since May 2025. |
 | Language | TypeScript, `strict: true` | — |
-| UI | **Preact 10 via `preact/compat`** ← changed | Was React 19. See below. |
+| UI | **Preact 10** ← changed | Was React 19. The built side panel is 19.9 KB. |
 | Styling | Tailwind v4 | Radix Colors mapped through `@theme` |
 | Colour | `@radix-ui/colors` ← added | See `07-design.md` |
 | Database | `@sqlite.org/sqlite-wasm`, `opfs-sahpool` VFS, driven directly | Do not use a wrapper. See below. |
-| Passphrase KDF | `@openpgp/argon2id` ← added | Under 7 KB, WASM inlined. See `03-security.md`. |
-| Messaging | `@webext-core/messaging` v4 ← added | Typed messages across all four contexts |
+| Passphrase KDF | `hash-wasm` ← added | Argon2id, about 11 KB. `@openpgp/argon2id` does not exist on npm. |
+| Messaging | `@webext-core/messaging` v4 ← added | Typed messages. No namespace option for the extension messenger, so channels are separated by key prefix. |
 | Lint and format | Biome | One package, one binary set, lint and format together |
 | Unit tests | Vitest, with WXT's bundled `@webext-core/fake-browser` | An in-memory `chrome.*`, so most logic needs no browser |
 | End-to-end | Playwright | With one real limitation, below |
@@ -220,20 +220,12 @@ auth cookie that expires every three hours.
 
 ## CI
 
-```yaml
-# .github/workflows/ci.yml
-on: [push, pull_request]
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-```
+One job, in `.github/workflows/ci.yml`: install, `pnpm check`, `pnpm build`,
+then the phase gate against a real browser.
+
+The gate is in CI rather than only on a laptop because a gate that runs in one
+place rots. It reads a fixture CV at `tests/e2e/fixture-cv.md`, never anyone's
+real one, and takes the real file only when `PAGEMYCV_CV` points at it.
 
 Keep it to one job. A pipeline you do not read is a pipeline that goes red and
 stays red.

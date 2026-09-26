@@ -10,10 +10,11 @@ PageMyCV is the browser half of [Byte](https://github.com/elvisxd/byte). Byte fi
 the job, scores it against your profile and writes the text. PageMyCV is the hand
 that types it into the form and then stops.
 
-**Status: planning, with Phase 0 verified.** No product code yet. This
-repository holds the design, the security model, the phase plan, and a
-[spike harness](spikes/phase-0/) that answered four of the five architectural
-unknowns in a real browser rather than on paper.
+**Status: Phase 1 done.** The vault works: your CV is imported, encrypted and
+locked behind a passphrase, and the extension has no network code at all. It
+does not fill forms yet. That is Phase 2.
+
+<img src="docs/media/panel-light.png" alt="The side panel showing an imported CV and the sensitive fields that are never filled automatically" width="360">
 
 ---
 
@@ -106,6 +107,15 @@ The risk lands on your account, not on this project. See
 | [`09-ats.md`](docs/09-ats.md) | Per-ATS field maps, selectors and honeypots |
 | [`DECISIONS.md`](docs/DECISIONS.md) | Every choice made, why, and the one still open |
 | [`spikes/phase-0/`](spikes/phase-0/) | The verification harness and its results |
+
+## Running it
+
+```bash
+pnpm install
+pnpm build            # then load .output/chrome-mv3 as an unpacked extension
+pnpm check            # typecheck, lint, 32 unit tests, and the invariant guard
+node tests/e2e/gate.cjs   # the Phase 1 gate, against a real browser
+```
 
 ## License
 
