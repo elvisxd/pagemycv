@@ -145,3 +145,60 @@ describe('the real cv.md', () => {
     expect(cv.education.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// Each of these was a real defect found in review. They are grouped because
+// they share a cause: a heuristic that was right for one shape of CV and
+// silently wrong for another, with no error and no visible symptom.
+describe('shapes of CV that used to parse wrong', () => {
+  it('keeps the employer when the title contains a dash', () => {
+    const cv = parseCvMarkdown(
+      '# A B\n\n## Experience\n\n### Senior Engineer — Payments — Stripe\n*2020 — 2022 · Remote*\n\n- did things\n',
+    );
+    expect(cv.work[0]?.employer).toBe('Stripe');
+    expect(cv.work[0]?.title).toBe('Senior Engineer — Payments');
+  });
+
+  it('still reads the ordinary two part heading', () => {
+    const cv = parseCvMarkdown(
+      '# A B\n\n## Experience\n\n### Full-Stack Developer — Freelance\n*2022 — Present · Remote*\n',
+    );
+    expect(cv.work[0]?.title).toBe('Full-Stack Developer');
+    expect(cv.work[0]?.employer).toBe('Freelance');
+  });
+
+  it('reads a year range written with a plain hyphen', () => {
+    expect(parseRange('2012-2017')).toEqual({ startedOn: '2012', endedOn: '2017' });
+    expect(parseRange('2012 - 2017')).toEqual({ startedOn: '2012', endedOn: '2017' });
+    expect(parseRange('2012–2017')).toEqual({ startedOn: '2012', endedOn: '2017' });
+  });
+
+  it('does not mistake a bold headline for a location', () => {
+    const cv = parseCvMarkdown('# A B\n\n**Senior Engineer, Remote**\n\n## Experience\n');
+    expect(cv.city).toBeNull();
+    expect(cv.region).toBeNull();
+  });
+
+  it('still reads the location from a bullet', () => {
+    const cv = parseCvMarkdown(
+      '# A B\n\n- Orlando, Florida · Open to relocation & remote work\n\n## Experience\n',
+    );
+    expect(cv.city).toBe('Orlando');
+    expect(cv.region).toBe('Florida');
+  });
+
+  it('finds the headline when the document starts with front matter', () => {
+    const front = `---\ntitle: cv\nauthor: someone\n---\n\n<!-- generated -->\n\n${'\n'.repeat(14)}`;
+    const cv = parseCvMarkdown(`${front}# A B\n\n**Senior Engineer**\n\nMy summary.\n`);
+    expect(cv.headline).toBe('Senior Engineer');
+    expect(cv.summary).toBe('My summary.');
+  });
+
+  it('does not turn prose into links', () => {
+    const cv = parseCvMarkdown(
+      '# A B\n\n- Shipped v2.1/beta and moved to Node.js/22 runtime\n- github.com/someone\n\n## Experience\n',
+    );
+    const urls = cv.links.map((l) => l.url);
+    expect(urls).toContain('https://github.com/someone');
+    expect(urls.some((u) => u.includes('v2.1'))).toBe(false);
+  });
+});

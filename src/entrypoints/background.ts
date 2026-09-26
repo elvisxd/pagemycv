@@ -14,13 +14,24 @@ const OFFSCREEN_PATH = 'offscreen.html';
 let creating: Promise<void> | null = null;
 
 async function ensureOffscreen(): Promise<void> {
-  if (await chrome.offscreen.hasDocument()) return;
+  // `creating` is consulted FIRST. hasDocument() returns true for a document
+  // that exists but whose scripts have not run yet, so checking it first let a
+  // second message skip the wait and send into a document with no listeners,
+  // which rejects with "Could not establish connection".
   if (creating) return creating;
+  if (await chrome.offscreen.hasDocument()) return;
   creating = chrome.offscreen
     .createDocument({
       url: OFFSCREEN_PATH,
       reasons: [chrome.offscreen.Reason.WORKERS],
       justification: 'Spawns the dedicated worker that owns the encrypted vault.',
+    })
+    .catch(async (err: Error) => {
+      // Chrome rejects with "Only a single offscreen document may be created"
+      // when one is already being created, which is a race rather than a
+      // failure. Anything else is real.
+      if (await chrome.offscreen.hasDocument()) return;
+      throw err;
     })
     .finally(() => {
       creating = null;

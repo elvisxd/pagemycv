@@ -24,7 +24,12 @@
   --bg: var(--gray-1);
   --surface: var(--gray-2);
   --surface-hover: var(--gray-3);
-  --border: var(--gray-6);
+  /* Step 9, not 6. Radix step 6 is the subtle-separator step and measures
+     1.38:1 against the app background, while WCAG 1.4.11 asks for 3:1 on
+     anything needed to identify a control. This border is the only visual
+     boundary of the passphrase field and of every quiet button. */
+  --border: var(--gray-9);
+  --border-subtle: var(--gray-6);
   --text: var(--gray-12);
   --text-muted: var(--gray-11);
 
@@ -33,16 +38,27 @@
   --brand: var(--gray-12);
   --brand-contrast: var(--gray-1);
 
-  --filled: var(--blue-11);
-  --filled-bg: var(--blue-3);
-  --review: var(--orange-11);
-  --review-bg: var(--orange-3);
-  --sensitive: var(--plum-11);
-  --sensitive-bg: var(--plum-3);
-  --skipped: var(--gray-11);
-  --skipped-bg: var(--gray-3);
-  --error: var(--red-11);
-  --error-bg: var(--red-3);
+  /* Chip label text is step 12 and the background is step 2.
+     Step 11 was the obvious choice and it fails: blue measures 4.25:1 and
+     orange 3.99:1 against step 3 in the light theme, and no background step
+     rescues orange. Step 12 is still the hue, just darker, and it clears 4.5:1
+     everywhere. The glyph keeps step 11 so the hue still reads at a glance.
+     tests/unit/contrast.test.ts asserts every pair below. */
+  --filled: var(--blue-12);
+  --filled-glyph: var(--blue-11);
+  --filled-bg: var(--blue-2);
+  --review: var(--orange-12);
+  --review-glyph: var(--orange-11);
+  --review-bg: var(--orange-2);
+  --sensitive: var(--plum-12);
+  --sensitive-glyph: var(--plum-11);
+  --sensitive-bg: var(--plum-2);
+  --skipped: var(--gray-12);
+  --skipped-glyph: var(--gray-11);
+  --skipped-bg: var(--gray-2);
+  --error: var(--red-12);
+  --error-glyph: var(--red-11);
+  --error-bg: var(--red-2);
 }
 
 /* Radix keys its dark scales on .dark-theme. The class is applied from

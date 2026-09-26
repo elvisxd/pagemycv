@@ -159,7 +159,7 @@ want to search your own application history without unlocking the vault.
 | Argon2 implementation | `hash-wasm`, about 11 KB gzipped. `@openpgp/argon2id` is not published to npm. |
 | Key storage | **Never.** Derived with `extractable: false`, held in the offscreen document for the session. |
 | IV | 12 random bytes per value, stored alongside the ciphertext |
-| Additional authenticated data | `rowId ‖ columnName ‖ schemaVersion`, tested |
+| Additional authenticated data | `JSON.stringify([rowId, column, schemaVersion, padded])`, tested |
 | Auto-lock | 15 minutes idle |
 | Minimum passphrase | 12 characters, enforced in the worker, not only the panel |
 
@@ -190,9 +190,21 @@ ciphertext decrypts correctly in every position.** An attacker with write access
 to the database file could move the `visa_status` ciphertext into another row,
 or swap `phone` into `address`, and AES-GCM would authenticate all of it.
 
-Passing `additionalData = utf8(rowId + "." + columnName + "." + schemaVersion)`
-on both encrypt and decrypt closes that. It costs nothing and it is the single
-highest-value line in this document.
+Passing the binding as additional authenticated data on both encrypt and decrypt
+closes that. It costs nothing and it is the single highest-value line in this
+document.
+
+**The encoding is JSON, not a dot-joined string.** `rowId + "." + column` is
+ambiguous: a column named `a.b` with row `r`, and a column named `b` with row
+`r.a`, produce identical bytes. No such name exists today, but the row
+convention is `table:pk` and a table-qualified column is exactly the refactor
+that would introduce one.
+
+**The binding includes whether the value is padded**, which closes a silent
+corruption path. The flag used to live only in code, in neither the blob nor the
+database, so a write site and a read site that disagreed produced wrong
+plaintext with no error: `hello` written unpadded and read as padded came back
+as `llo`. Now the mismatch fails authentication.
 
 **Tested, not asserted.** The Phase 0 harness encrypts a value bound to one row,
 then tries to decrypt it as though it had been moved to another:

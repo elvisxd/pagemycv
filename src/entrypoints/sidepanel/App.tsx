@@ -29,6 +29,8 @@ export function App() {
   const [markdown, setMarkdown] = useState('');
   const [imported, setImported] = useState<string | null>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
+  const markdownRef = useRef<HTMLTextAreaElement>(null);
+  const importButtonRef = useRef<HTMLButtonElement>(null);
   /**
    * Only the newest request may write state.
    *
@@ -74,6 +76,23 @@ export function App() {
     if (vault && vault.status !== 'unlocked') passphraseRef.current?.focus();
   }, [vault]);
 
+  // Opening the import view unmounts the button that opened it, so focus falls
+  // to the body and a keyboard user has to tab from the top of the panel.
+  // Closing it does the same in reverse.
+  useEffect(() => {
+    if (showImport) markdownRef.current?.focus();
+    else importButtonRef.current?.focus();
+  }, [showImport]);
+
+  useEffect(() => {
+    if (!showImport) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowImport(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showImport]);
+
   // Keeps the auto-lock honest: the panel being open is not activity, but
   // using it is. Polls the state so an expiry is reflected without a reload.
   useEffect(() => {
@@ -105,8 +124,15 @@ export function App() {
   };
 
   const lock = async () => {
-    await sendVault('vault:lock', undefined);
-    await refresh();
+    setError(null);
+    try {
+      await sendVault('vault:lock', undefined);
+      await refresh();
+    } catch (e) {
+      // Silence here would leave the panel showing an unlocked vault while the
+      // user believes they locked it.
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const importCv = async () => {
@@ -130,7 +156,28 @@ export function App() {
   if (!vault) {
     return (
       <Screen>
-        <Muted>Opening the vault…</Muted>
+        <Heading>PageMyCV</Heading>
+        <p role="status" aria-live="polite" style={{ color: 'var(--text-muted)', margin: 0 }}>
+          {error ? 'The vault could not be opened.' : 'Opening the vault…'}
+        </p>
+        {/* This screen used to render nothing but the spinner, so a failure on
+            the very first message left it there for good with the reason
+            captured in a variable nobody displayed. */}
+        {error ? (
+          <>
+            <ErrorNote>{error}</ErrorNote>
+            <div style={{ marginTop: 10 }}>
+              <Button
+                onClick={() => {
+                  setError(null);
+                  refresh().catch((e: Error) => setError(e.message));
+                }}
+              >
+                Try again
+              </Button>
+            </div>
+          </>
+        ) : null}
       </Screen>
     );
   }
@@ -166,6 +213,7 @@ export function App() {
           <input
             type="password"
             ref={passphraseRef}
+            autocomplete={creating ? 'new-password' : 'current-password'}
             value={passphrase}
             placeholder="Passphrase"
             aria-label="Passphrase"
@@ -217,6 +265,7 @@ export function App() {
               and links already stored.
             </p>
             <textarea
+              ref={markdownRef}
               value={markdown}
               data-testid="cv-markdown"
               aria-label="CV markdown"
@@ -245,11 +294,24 @@ export function App() {
         </Section>
       ) : (
         <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Button variant="quiet" onClick={() => setShowImport(true)}>
+          <Button
+            buttonRef={importButtonRef}
+            variant="quiet"
+            onClick={() => {
+              setImported(null);
+              setError(null);
+              setShowImport(true);
+            }}
+          >
             {p?.profile ? 'Re-import CV' : 'Import your CV'}
           </Button>
           {imported ? (
-            <span data-testid="import-result" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+            <span
+              data-testid="import-result"
+              role="status"
+              aria-live="polite"
+              style={{ color: 'var(--text-muted)', fontSize: 11 }}
+            >
               {imported}
             </span>
           ) : null}

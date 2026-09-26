@@ -84,6 +84,20 @@ describe('position binding', () => {
   });
 });
 
+describe('the padding flag is part of the format', () => {
+  it('refuses to read an unpadded value as padded', async () => {
+    const blob = await encryptValue(key, 'hello', 'r', 'c');
+    // This used to resolve to "llo": a slice of the plaintext, silently.
+    await expect(decryptValue(key, blob, 'r', 'c', { padded: true })).rejects.toThrow();
+  });
+
+  it('refuses to read a padded value as unpadded', async () => {
+    const blob = await encryptValue(key, 'hello', 'r', 'c', { padded: true });
+    // This used to resolve to "\u0000\u0005hello\u0000…" straight into a form.
+    await expect(decryptValue(key, blob, 'r', 'c')).rejects.toThrow();
+  });
+});
+
 describe('padding', () => {
   it('hides the length of a low entropy value', async () => {
     const short = await encryptValue(key, 'Yes', 'r', 'c', { padded: true });
@@ -96,6 +110,24 @@ describe('padding', () => {
     const short = await encryptValue(key, 'Yes', 'r', 'c');
     const long = await encryptValue(key, 'No, and I never will', 'r', 'c');
     expect(short.length).not.toBe(long.length);
+  });
+
+  it('round trips a value that exactly fills a block', async () => {
+    const exact = 'x'.repeat(PAD_BLOCK - 2);
+    const blob = await encryptValue(key, exact, 'r', 'c', { padded: true });
+    await expect(decryptValue(key, blob, 'r', 'c', { padded: true })).resolves.toBe(exact);
+  });
+
+  it('round trips an empty value', async () => {
+    const blob = await encryptValue(key, '', 'r', 'c', { padded: true });
+    await expect(decryptValue(key, blob, 'r', 'c', { padded: true })).resolves.toBe('');
+  });
+
+  it('measures bytes, not characters', async () => {
+    // 40 characters, 80 bytes: must land in the second block, not the first.
+    const accented = 'ñ'.repeat(40);
+    const blob = await encryptValue(key, accented, 'r', 'c', { padded: true });
+    await expect(decryptValue(key, blob, 'r', 'c', { padded: true })).resolves.toBe(accented);
   });
 
   it('round trips a padded value exactly', async () => {
@@ -153,8 +185,15 @@ describe('the security parameters are pinned', () => {
     expect(passphraseProblem('twelvechars!')).toBeNull();
   });
 
-  it('binds a ciphertext to row, then column, then version, in that order', () => {
-    expect(new TextDecoder().decode(aad('contact:1', 'city_enc'))).toBe('contact:1.city_enc.1');
+  it('binds a ciphertext to row, column, version and padding', () => {
+    expect(new TextDecoder().decode(aad('contact:1', 'city_enc'))).toBe(
+      '["contact:1","city_enc",1,false]',
+    );
+  });
+
+  it('cannot produce the same binding for two different positions', () => {
+    // Dot-joining made these identical. A self-delimiting encoding cannot.
+    expect(aad('a.b', 'c')).not.toEqual(aad('a', 'b.c'));
   });
 });
 
