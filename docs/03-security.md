@@ -155,7 +155,7 @@ want to search your own application history without unlocking the vault.
 |---|---|
 | Cipher | AES-GCM, 256-bit, via WebCrypto |
 | Key derivation | **Argon2id**, `m = 19 MiB`, `t = 2`, `p = 1`, the current OWASP configuration |
-| Argon2 implementation | `@openpgp/argon2id`, under 7 KB gzipped with the WASM inlined |
+| Argon2 implementation | `hash-wasm`, about 11 KB gzipped. `@openpgp/argon2id` is not published to npm. |
 | Key storage | **Never.** Derived with `extractable: false`, held in the offscreen document for the session. |
 | IV | 12 random bytes per value, stored alongside the ciphertext |
 | Additional authenticated data | `rowId ‖ columnName ‖ schemaVersion`, tested |
@@ -173,7 +173,7 @@ threat this scheme exists for is an offline attack on a stolen database
 containing a name, an address, a phone number and a visa status. That data is
 long-lived and cannot be rotated after a breach. Argon2id at the OWASP
 configuration buys roughly three orders of magnitude of resistance to a GPU
-attack, for the same unlock latency, at a cost of under 7 KB.
+attack, for the same unlock latency, at a cost of about 11 KB.
 
 The manifest already carries `wasm-unsafe-eval` for SQLite, so the WASM adds no
 new policy surface.
