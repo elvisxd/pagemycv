@@ -54,16 +54,22 @@ const EXPECT = {
 // context.route, so the URL a content script matches on is genuinely
 // https://jobs.lever.co/... while nothing is fetched from the network. The
 // extension is not modified for the test in any way.
+const FIXTURE_ORIGINS = ['https://jobs.lever.co', 'https://boards.greenhouse.io'];
+
 const BOARDS = {
   lever: {
     url: 'https://jobs.lever.co/acme/8f2a1b6c-0000-4c1a-9f10-2b5e7d4a1c33/apply',
-    glob: 'https://jobs.lever.co/**',
     file: path.join(__dirname, '../fixtures/lever.html'),
   },
   greenhouse: {
     url: 'https://boards.greenhouse.io/acme/jobs/4102938',
-    glob: 'https://boards.greenhouse.io/**',
     file: path.join(__dirname, '../fixtures/greenhouse.html'),
+  },
+  // A form with no file input at all. Most application pages have none, and
+  // the CV bytes must not cross into a page that has nowhere to put them.
+  nofile: {
+    url: 'https://jobs.lever.co/acme/no-file-here/apply',
+    file: path.join(__dirname, '../fixtures/lever-nofile.html'),
   },
 };
 
@@ -109,7 +115,7 @@ async function launch() {
     // A fixture page the harness navigated to itself, answered from disk by
     // the route below. Counted separately rather than excused: the gate
     // asserts at the end that the only such requests are the ones it caused.
-    if (Object.values(BOARDS).some((b) => u.startsWith(b.url.split('?')[0].slice(0, 30)))) {
+    if (FIXTURE_ORIGINS.some((origin) => u.startsWith(origin))) {
       servedLocally.push(u);
       return;
     }
@@ -118,14 +124,22 @@ async function launch() {
   // Fulfilled from disk. The request never reaches the network, and the page
   // still commits at the real board URL, which is what the content script's
   // `matches` are tested against.
-  for (const board of Object.values(BOARDS)) {
-    await ctx.route(board.glob, (route) =>
-      route.fulfill({
+  //
+  // One route per origin, picking the fixture by exact URL. Two overlapping
+  // globs would work only because Playwright matches routes in reverse
+  // registration order, which is a rule nobody should have to remember while
+  // reading a test.
+  for (const origin of FIXTURE_ORIGINS) {
+    await ctx.route(`${origin}/**`, (route) => {
+      const url = route.request().url();
+      const board = Object.values(BOARDS).find((b) => b.url === url);
+      if (!board) return route.abort();
+      return route.fulfill({
         status: 200,
         contentType: 'text/html; charset=utf-8',
         body: fs.readFileSync(board.file, 'utf8'),
-      }),
-    );
+      });
+    });
   }
   opened.push(ctx);
   let [sw] = ctx.serviceWorkers();
@@ -534,7 +548,39 @@ async function main() {
     gv.prefilled_phone,
   );
   check('greenhouse: no cover letter was written', (gv.cover_letter ?? '') === '');
+  // The label-borrowing bug, end to end. A flat container with one label and
+  // two controls: the second must not inherit the first's question, because
+  // that is how an email address ends up in a salary box.
+  check(
+    'greenhouse: the field beside a labelled one does NOT inherit its label',
+    (gv.unlabelled_neighbour ?? '') === '',
+    `unlabelled_neighbour -> "${gv.unlabelled_neighbour}"`,
+  );
+  check(
+    'greenhouse: the labelled one of that pair is still filled, so the fix is not a blanket refusal',
+    gv.shared_email === EXPECT.email,
+    `shared_email -> "${gv.shared_email}"`,
+  );
   await gh.job.close();
+
+  // ── A form with no file input ───────────────────────────────────────────
+  const nofile = await fillBoard('nofile');
+  const nv = nofile.state.values;
+  check('no-file form: it never submitted', nofile.state.submits === 0);
+  check(
+    'no-file form: it still fills what it recognises',
+    nv.name === EXPECT.full && nv.email === EXPECT.email,
+    JSON.stringify({ name: nv.name, email: nv.email }),
+  );
+  // Nothing was attached, because there was nothing to attach to. That the
+  // bytes were therefore never SENT is planNeedsResume's job and is asserted
+  // in tests/unit/fill.test.ts; this is the observable half.
+  check(
+    'no-file form: nothing was attached, because there is nowhere to attach it',
+    !/attached/i.test(nofile.review),
+    nofile.report.replace(/\n/g, ' '),
+  );
+  await nofile.job.close();
 
   await ctx.close();
 

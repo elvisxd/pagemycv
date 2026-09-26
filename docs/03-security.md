@@ -91,6 +91,15 @@ pending confirmation. **Built and passing:** nine sensitive fields on the Lever
 fixture and five on the Greenhouse one, all still empty after a full fill, each
 with its own row in the review list.
 
+**And re-checked at the moment of writing.** A plan crosses two message hops
+before it is executed, and a framework can reuse a DOM node while changing its
+attributes, so an element reference can still be live and no longer be the
+same field. Every write action carries a fingerprint — tag, type, name, id —
+that `src/fill/write.ts` re-derives from the element before touching it, plus
+an `isConnected` check. Without them the right value goes into the wrong box
+and is reported as a success. The guard fails the build if either check
+disappears.
+
 **Enforced by absence, not by filtering.** `readFillValues` in
 `src/db/worker.ts` builds the values object from a literal set of keys and
 does not read the `sensitive_value` table at all, so there is no ordering bug

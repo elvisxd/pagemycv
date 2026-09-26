@@ -8,7 +8,7 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { atsForUrl } from '../ats/registry';
 import { classify } from '../fill/detect';
-import { buildPlan } from '../fill/plan';
+import { buildPlan, planNeedsResume } from '../fill/plan';
 import type { FillReport } from '../fill/types';
 import type { DbProtocol } from '../messaging/db';
 import { sendDb } from '../messaging/db';
@@ -85,8 +85,18 @@ async function fillActiveTab(): Promise<FillReport> {
   // the manifest lists, because that list is the only way this script is ever
   // injected. The connection error is the evidence, so it is reported as the
   // real answer rather than as a failure.
-  const survey = await sendFill('fill:describe', undefined, tabId).catch(() => {
-    throw new Error(UNSUPPORTED);
+  // A connection error means there is no content script on the page, which
+  // means the page is not one of the two hosts the manifest lists — that list
+  // is the only way this script is ever injected, so the error IS the answer.
+  // Anything else is a real failure inside the content script and must be
+  // reported as itself: reporting a bug of ours as "this site is not
+  // supported" is the kind of lie that costs an afternoon.
+  const survey = await sendFill('fill:describe', undefined, tabId).catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/could not establish connection|receiving end does not exist/i.test(message)) {
+      throw new Error(UNSUPPORTED);
+    }
+    throw err;
   });
   const ats = atsForUrl(survey.url);
   if (ats.id === 'unknown') throw new Error(UNSUPPORTED);
@@ -98,7 +108,13 @@ async function fillActiveTab(): Promise<FillReport> {
   const classifications = classify(survey.fields, ats);
   const plan = buildPlan(survey.fields, classifications, values, ats, resume?.filename ?? null);
 
-  return sendFill('fill:apply', { plan, resume }, tabId);
+  return sendFill(
+    'fill:apply',
+    // The bytes cross into the page's process only when the plan has
+    // somewhere to put them. See planNeedsResume.
+    { plan, resume: planNeedsResume(plan) ? resume : null, generation: survey.generation },
+    tabId,
+  );
 }
 
 /**

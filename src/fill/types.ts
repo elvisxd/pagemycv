@@ -41,6 +41,16 @@ export type MatchStrategy = 'autocomplete' | 'chromium' | 'ats' | 'label' | 'sen
 export interface FieldDescriptor {
   /** Stable within one page pass. Used to correlate a plan back to an element. */
   ref: string;
+  /**
+   * What this control looked like when it was described: tag, type, name, id.
+   *
+   * The plan carries it and the writer re-derives it from the live element
+   * before touching anything. A page can re-render between the two messages,
+   * and React reuses DOM nodes while changing their attributes, so a held
+   * reference can quietly become a different field. Without this, the right
+   * value would be written into the wrong box and reported as a success.
+   */
+  fingerprint: string;
   tag: 'input' | 'select' | 'textarea';
   /** Lowercased `type` for inputs; 'select-one' / 'select-multiple' for selects. */
   type: string;
@@ -121,6 +131,7 @@ export type SkipReason =
   | 'sensitive'
   | 'unrecognised'
   | 'unsupported'
+  | 'never-auto'
   | 'no-value'
   | 'already-filled';
 
@@ -129,6 +140,8 @@ export type PlannedField =
   | {
       action: 'fill';
       ref: string;
+      /** Re-checked against the live element before the write. */
+      fingerprint: string;
       label: string;
       kind: FieldKind;
       strategy: MatchStrategy;
@@ -140,6 +153,7 @@ export type PlannedField =
   | {
       action: 'attach';
       ref: string;
+      fingerprint: string;
       label: string;
       kind: 'resume_file';
       strategy: MatchStrategy;
@@ -186,7 +200,20 @@ export interface ResumeFile {
 /** What the background sends the content script. Never a sensitive value. */
 export interface FillRequest {
   plan: FillPlan;
+  /**
+   * Present only when the plan actually has something to attach it to.
+   *
+   * Sending it regardless would put the whole CV in a page's process on every
+   * fill, including the many forms with no file input at all, which is the
+   * opposite of the reason the plan is built in the background.
+   */
   resume: ResumeFile | null;
+  /**
+   * The describe pass this plan was built from. The content script refuses a
+   * plan from an older pass, so two fills racing cannot apply one plan to the
+   * other's elements.
+   */
+  generation: number;
 }
 
 /** What comes back. Counts the gate asserts on, plus the list the panel shows. */

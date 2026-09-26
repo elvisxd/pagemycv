@@ -19,6 +19,13 @@ export interface PageSurvey {
   url: string;
   /** Every control on the page, flattened. Page text, treated as data. */
   fields: FieldDescriptor[];
+  /**
+   * Which describe pass produced this. The plan built from it carries the
+   * same number back, and the content script refuses a plan from an older
+   * pass: two panels filling the same tab would otherwise have the second
+   * describe overwrite the element map the first plan was built against.
+   */
+  generation: number;
 }
 
 interface FillProtocol {

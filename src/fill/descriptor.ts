@@ -4,14 +4,30 @@
 //
 // It reads and never writes. The elements themselves stay in the caller's
 // closure, keyed by the `ref` field, so nothing here marks up the page: a
-// `data-*` attribute added to every control would be a fingerprint the page
-// could read back, and a page that can tell it is being autofilled is a page
-// that can behave differently while it is.
+// `data-*` attribute on every control would be a flag the page could read
+// back, and a page that can tell it is being autofilled is a page that can
+// behave differently while it is.
+//
+// That is a narrow claim, not a broad one. The highlight src/fill/write.ts
+// draws IS an inline style the page can read, and a page watching for `input`
+// events can see the writes as they happen. Marking every control before
+// anything is decided would be worse than either: it would announce the scan
+// itself, including for the fields we then refuse.
 import type { FieldDescriptor, VisibilityMetrics } from './types';
 
 export type Control = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
 const SELECTOR = 'input, select, textarea';
+
+/**
+ * Past this, it is prose rather than a field name.
+ *
+ * A label is a question, and a question fits. The limit matters because the
+ * classifier matches patterns against this text: a paragraph of terms that
+ * mentions "salary" would otherwise make the field it wraps look sensitive,
+ * and one that mentions "email" would make it look fillable.
+ */
+const MAX_LABEL = 200;
 
 /** Ancestor walk, capped: a deeply nested form should not cost O(depth) twice. */
 const MAX_ANCESTORS = 40;
@@ -87,10 +103,18 @@ function clippedByAncestor(el: Control, memo: Map<Element, boolean>): boolean {
 /** Kept in step with MIN_EDGE in visibility.ts, which owns the rule. */
 const MIN_VISIBLE_EDGE = 4;
 
-function measure(el: Control, doc: Document, clipMemo: Map<Element, boolean>): VisibilityMetrics {
+interface PageMetrics {
+  documentWidth: number;
+  documentHeight: number;
+}
+
+function measure(
+  el: Control,
+  clipMemo: Map<Element, boolean>,
+  page: PageMetrics,
+): VisibilityMetrics {
   const rect = el.getBoundingClientRect();
   const style = el.ownerDocument.defaultView?.getComputedStyle(el);
-  const root = doc.documentElement;
   return {
     width: rect.width,
     height: rect.height,
@@ -117,8 +141,7 @@ function measure(el: Control, doc: Document, clipMemo: Map<Element, boolean>): V
           })
         : true,
     clipped: clippedByAncestor(el, clipMemo),
-    documentWidth: Math.max(root.scrollWidth, root.clientWidth),
-    documentHeight: Math.max(root.scrollHeight, root.clientHeight),
+    ...page,
   };
 }
 
@@ -159,15 +182,24 @@ export function labelFor(el: Control): string {
     const clone = wrapping.cloneNode(true) as HTMLElement;
     for (const control of clone.querySelectorAll(SELECTOR)) control.remove();
     const label = text(clone);
-    if (label) return label;
+    // A consent paragraph wrapped in a <label> is not a field name. Anything
+    // this long is prose, and prose that happens to contain "email" or
+    // "salary" would steer the classifier for a field it does not describe.
+    if (label && label.length <= MAX_LABEL) return label;
   }
 
   const aria = el.getAttribute('aria-label');
   if (aria?.trim()) return aria.trim();
 
   // A sibling label, which is the shape both boards actually emit.
+  //
+  // The walk stops at the first other control. A label that sits before
+  // ANOTHER field belongs to that field, and taking it here is how the second
+  // input in a flat container inherits the first one's question — the exact
+  // shape that puts an email address into a salary box.
   let node: Element | null = el.previousElementSibling;
   for (let i = 0; node && i < 4; i++) {
+    if (node.matches(SELECTOR) || node.querySelector(SELECTOR)) break;
     if (node.tagName === 'LABEL' || node.tagName === 'LEGEND') {
       const label = text(node);
       if (label) return label;
@@ -176,11 +208,19 @@ export function labelFor(el: Control): string {
   }
 
   // Finally the enclosing field group, where the label may be a heading or a
-  // span. Bounded, and only the first label-ish descendant, because a whole
-  // fieldset's text is not a label.
+  // span rather than a <label>.
+  //
+  // Only when that group holds exactly ONE control. `closest(… , 'div')`
+  // almost always matches something, and taking the first label-ish
+  // descendant of a container that holds several fields hands this field the
+  // label of the first one — which is how a value ends up in the right-looking
+  // wrong box. One control in the group is the evidence that the label can
+  // only be describing this field.
   const group = el.closest('[class*="field" i], [class*="question" i], fieldset, li, p, div');
-  const inGroup = group?.querySelector('label, legend, .label, [class*="label" i]');
-  if (inGroup && !inGroup.contains(el)) return text(inGroup);
+  if (group && group.querySelectorAll(SELECTOR).length === 1) {
+    const inGroup = group.querySelector('label, legend, .label, [class*="label" i]');
+    if (inGroup && !inGroup.contains(el)) return text(inGroup);
+  }
 
   return '';
 }
@@ -194,6 +234,17 @@ function controlType(el: Control): string {
 function optionsOf(el: Control): { value: string; text: string }[] {
   if (!(el instanceof HTMLSelectElement)) return [];
   return Array.from(el.options).map((o) => ({ value: o.value, text: text(o) }));
+}
+
+/**
+ * What identifies this control, for the writer to re-check before it writes.
+ *
+ * Deliberately the four attributes a form uses to say what a field IS, and
+ * deliberately not the label, which is read from the surrounding DOM and can
+ * legitimately change while the field stays the same.
+ */
+export function fingerprintOf(el: Control): string {
+  return [tagOf(el), controlType(el), el.getAttribute('name') ?? '', el.id ?? ''].join('|');
 }
 
 function tagOf(el: Control): FieldDescriptor['tag'] {
@@ -217,13 +268,21 @@ export function describeForm(doc: Document = document): {
   const elements = new Map<string, Control>();
 
   const clipMemo = new Map<Element, boolean>();
+  // Once per pass, not once per field: scrollWidth forces layout, and a long
+  // application has a hundred controls.
+  const root = doc.documentElement;
+  const page: PageMetrics = {
+    documentWidth: Math.max(root.scrollWidth, root.clientWidth),
+    documentHeight: Math.max(root.scrollHeight, root.clientHeight),
+  };
   const all = Array.from(doc.querySelectorAll<Control>(SELECTOR));
   all.forEach((el, index) => {
     const ref = `f${index}`;
     elements.set(ref, el);
-    const value = el instanceof HTMLSelectElement ? el.value : el.value;
+    const value = el.value;
     fields.push({
       ref,
+      fingerprint: fingerprintOf(el),
       tag: tagOf(el),
       type: controlType(el),
       name: el.getAttribute('name') ?? '',
@@ -244,7 +303,7 @@ export function describeForm(doc: Document = document): {
       disabled: isDisabled(el),
       readOnly: el instanceof HTMLSelectElement ? false : el.readOnly,
       options: optionsOf(el),
-      metrics: measure(el, doc, clipMemo),
+      metrics: measure(el, clipMemo, page),
     });
   });
 
