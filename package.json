@@ -35,6 +35,8 @@
     "fix": "biome check --write .",
     "test": "vitest run",
     "guard": "node scripts/guard.mjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm guard"
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm patterns:check && pnpm guard",
+    "patterns": "node scripts/build-patterns.mjs",
+    "patterns:check": "node scripts/build-patterns.mjs --check"
   }
 }

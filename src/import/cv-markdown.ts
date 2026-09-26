@@ -35,6 +35,8 @@ export interface ParsedCv {
   summary: string | null;
   city: string | null;
   region: string | null;
+  email: string | null;
+  phone: string | null;
   work: ParsedWork[];
   education: ParsedEducation[];
   links: ParsedLink[];
@@ -158,6 +160,26 @@ export function parseCvMarkdown(markdown: string): ParsedCv {
     }
   }
 
+  // Email and phone, from the same header block the links come from.
+  //
+  // Phase 1 parsed neither, so the vault held no email at all and a filled
+  // application was missing the one field every board makes required. The
+  // gate caught it: five fields written on a Lever form and the email box
+  // still empty.
+  const header = lines.slice(titleAt, titleAt + 26).join('\n');
+  // A mailto: link or a bare address. Deliberately conservative about the
+  // trailing characters, because a markdown link wraps the address in
+  // punctuation that is not part of it.
+  const emailMatch = header.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/);
+  const email = emailMatch ? emailMatch[0].replace(/[.,)\]]+$/, '') : null;
+  // A phone number only where it is labelled as one. Any run of digits in a
+  // CV header is far more likely to be a year, a postcode or a version.
+  const phoneLine = lines
+    .slice(titleAt, titleAt + 26)
+    .find((l) => /\b(tel|phone|mobile|m[óo]vil|tel[ée]fono|whatsapp)\b/i.test(l));
+  const phoneMatch = phoneLine?.match(/\+?[\d][\d\s().-]{6,}\d/);
+  const phone = phoneMatch ? phoneMatch[0].trim().replace(/[\s.-]+$/, '') : null;
+
   // Location, from the line that names relocation or remote.
   let city: string | null = null;
   let region: string | null = null;
@@ -252,6 +274,8 @@ export function parseCvMarkdown(markdown: string): ParsedCv {
     summary,
     city,
     region,
+    email,
+    phone,
     work,
     education,
     links,

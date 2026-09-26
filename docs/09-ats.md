@@ -146,14 +146,41 @@ no education, no visa status, no salary, no demographics. Those stay ours.
 least three fields classified with distinct types. Without it they fire on search
 boxes.
 
-So field detection is four passes, not three:
+So field detection is four passes, not three. **Pass 0 was added while
+building it, and the order of 2 and 3 was reversed.**
 
 | Pass | Source | Roughly |
 |---|---|---|
+| **0** | **The sensitive class** | **Runs first and wins. See below.** |
 | 1 | The `autocomplete` attribute | 10 fields, when the form is marked up well |
-| 2 | Chromium's patterns | Identity, address and phone, even on badly marked-up forms |
-| 3 | The per-ATS map above | The fields each ATS names in its own way |
-| 4 | Our own label heuristics | Work history, education, authorization, demographics |
+| 2 | The per-ATS map above | The fields each ATS names in its own way |
+| 3 | Chromium's patterns | Identity, address and phone, even on badly marked-up forms |
+| 4 | Our own label heuristics | Work history, education, links, notice period |
+
+**Why pass 0 exists, and why it has to be first.** *"Country of citizenship"*
+matches Chromium's `COUNTRY` pattern exactly. Without a sensitive pass ahead
+of everything, the planner would write the user's country of residence into a
+citizenship question and report it as a success. `autocomplete="bday"` is the
+same shape of problem: a standards-blessed token for a field we refuse on
+purpose. `src/fill/sensitive-match.ts` runs before all four and vetoes them,
+and `tests/unit/fill.test.ts` pins both collisions.
+
+**Why 2 and 3 swapped.** An exact match on a field name a board documents to
+its own integrators is stronger evidence than a regex over label text, and
+the confidence scores say so: 0.9 against 0.8. Leaving the order as first
+drafted would have let the weaker signal pre-empt the stronger one. No
+conflict between them was found on either board — Lever's `org` is invisible
+to Chromium's `COMPANY_NAME`, which wants the whole word `organization` — so
+in practice this changes ranking rather than results.
+
+**Two of the vendored IGNORED patterns cannot be used as written.**
+`REGION_IGNORED` is `province|region|other`; as a global veto it would reject
+the `STATE` field it exists to disambiguate. `CREDIT_CARD_EXP_YEAR` is
+`exp|^/|year`, and a bare `exp` swallows "experience". Both are left out of
+`scripts/build-patterns.mjs`, and the rest are scoped to the kinds Chromium
+scopes them to rather than applied globally. English only: a Spanish pattern
+applied to an English form matches noise, and both Phase 2 boards are
+English.
 
 ---
 
@@ -180,12 +207,34 @@ thirty come from label heuristics, the per-ATS maps above, and finally from you.
 
 | ATS | Phase | Map verified against a live page |
 |---|---|---|
-| Lever | 2 | No |
-| Greenhouse | 2 | No |
-| Ashby | 2 | No |
+| Lever | 2 · built | No — against a fixture built from public page source |
+| Greenhouse | 2 · built | No — against a fixture built from public page source |
+| Ashby | Unplanned | No |
 | Greenhouse embedded | 3 | No |
 | Workday | 4 | No |
 | iCIMS, Taleo, SmartRecruiters | Unplanned | No |
 
-Update the right-hand column as `ats-probe` runs. A map nobody probed is a
-hypothesis.
+Update the right-hand column as `ats-probe` runs. **A map nobody probed is a
+hypothesis**, and that is still true of both Phase 2 maps: the gate proves the
+code does what it says against a form shaped like the real one, not that the
+form is shaped the way this document claims. The four passes are designed so
+that being wrong here costs recognition rather than correctness — a field the
+map misnames falls through to `autocomplete` and Chromium, and a field nothing
+recognises is reported as unrecognised rather than guessed at.
+
+Ashby moved out of Phase 2. It renders inside its own iframe, which makes it
+a Phase 3 problem wearing a Phase 2 label, and two boards were already enough
+to keep the shared code from hard-coding one ATS's habits.
+
+## The honeypot denylist, as built
+
+`src/fill/honeypot.ts` matches whole words rather than substrings, in both
+directions: substring matching would hit `websiteUrl`, a real field on several
+boards, and would still miss a trap named `bee_catcher`. camelCase is split,
+so `data-automation-id="beeCatcher"` is caught too.
+
+`website` is the interesting one. It is a genuine, wanted field on Lever and
+Greenhouse and a honeypot on Workday, so it is released from the denylist only
+on evidence: the field must be **visible and labelled**, both, never one. The
+gate asserts both halves — the visible labelled `website` is filled, and an
+off-screen one is not.

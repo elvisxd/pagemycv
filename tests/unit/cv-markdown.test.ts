@@ -202,3 +202,41 @@ describe('shapes of CV that used to parse wrong', () => {
     expect(urls.some((u) => u.includes('v2.1'))).toBe(false);
   });
 });
+
+// Email and phone. Phase 1 parsed neither, so the vault held no email at all
+// and every filled application was missing the one field boards make
+// required. The Phase 2 gate is what found it.
+describe('contact details in the header', () => {
+  const header = (lines: string) =>
+    parseCvMarkdown(
+      `# Ada Lovelace\n\n**Engineer**\n\n${lines}\n\n## Experience\n\n### Engineer — Acme\n\n2020 — Present\n`,
+    );
+
+  it('finds a bare address', () => {
+    expect(header('- ada@lovelace.test').email).toBe('ada@lovelace.test');
+  });
+
+  it('finds one inside a markdown link without its punctuation', () => {
+    expect(header('- [Email](mailto:ada@lovelace.test)').email).toBe('ada@lovelace.test');
+  });
+
+  it('finds a plus-addressed one', () => {
+    expect(header('- ada+jobs@lovelace.test').email).toBe('ada+jobs@lovelace.test');
+  });
+
+  it('reports no email rather than a guess', () => {
+    expect(header('- Orlando, Florida').email).toBeNull();
+  });
+
+  it('takes a phone number only where the line says it is one', () => {
+    expect(header('- Phone: +1 407 555 0142').phone).toBe('+1 407 555 0142');
+    expect(header('- Móvil: +34 600 123 456').phone).toBe('+34 600 123 456');
+  });
+
+  it('does not read a year, a postcode or a version as a phone number', () => {
+    // Every run of digits in a CV header is far more likely to be one of
+    // these, which is why the line has to name itself.
+    expect(header('- Orlando, Florida 32801 · since 2014').phone).toBeNull();
+    expect(header('- Shipped v2.10.2024 to production').phone).toBeNull();
+  });
+});

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Senior Engineer — Acme</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; }
+      label { display: block; margin-top: 12px; font-weight: 600; }
+      input, select, textarea { width: 100%; padding: 6px; font: inherit; }
+      /* The hidden-field techniques, each one a separate way to park a trap. */
+      .trap-display { display: none; }
+      .trap-visibility { visibility: hidden; }
+      .trap-opacity { opacity: 0; }
+      .trap-offscreen { position: absolute; left: -9999px; top: -9999px; }
+      .trap-tiny input { width: 1px; height: 1px; padding: 0; border: 0; }
+      .trap-clipped { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    </style>
+  </head>
+  <body>
+    <div class="posting-headline"><h2>Senior Engineer</h2></div>
+
+    <!-- A search box in the header. Chromium's own three-distinct-types guard
+         exists because heuristics fire on exactly this. -->
+    <label for="q">Search jobs</label>
+    <input type="search" id="q" name="q" />
+
+    <form id="application" action="/apply" method="post">
+      <label for="name">Full name<span aria-hidden="true">*</span></label>
+      <input type="text" id="name" name="name" required />
+
+      <label for="email">Email<span aria-hidden="true">*</span></label>
+      <input type="email" id="email" name="email" required />
+
+      <label for="phone">Phone</label>
+      <input type="tel" id="phone" name="phone" />
+
+      <label for="org">Current company</label>
+      <input type="text" id="org" name="org" />
+
+      <label for="resume">Resume/CV<span aria-hidden="true">*</span></label>
+      <input type="file" id="resume" name="resume" accept=".pdf,.doc,.docx,.txt,.md" />
+
+      <label for="linkedin">LinkedIn URL</label>
+      <input type="text" id="linkedin" name="urls[LinkedIn]" />
+
+      <label for="github">GitHub URL</label>
+      <input type="text" id="github" name="urls[GitHub]" />
+
+      <label for="comments">Additional information</label>
+      <textarea id="comments" name="comments" rows="4"></textarea>
+
+      <!-- A legitimate, visible, labelled `website`. It must be filled, which
+           is the whole reason the denylist releases the word on evidence
+           rather than refusing it outright. -->
+      <label for="website">Website</label>
+      <input type="text" id="website" name="website" />
+
+      <h3>Voluntary self-identification</h3>
+      <label for="gender">Gender</label>
+      <select id="gender" name="gender">
+        <option value="">Select…</option>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+        <option value="decline">Decline to self identify</option>
+      </select>
+
+      <label for="race">Race / Ethnicity</label>
+      <select id="race" name="race">
+        <option value="">Select…</option>
+        <option value="hispanic">Hispanic or Latino</option>
+        <option value="decline">Decline to self identify</option>
+      </select>
+
+      <label for="veteran">Veteran status</label>
+      <select id="veteran" name="veteran">
+        <option value="">Select…</option>
+        <option value="no">I am not a protected veteran</option>
+      </select>
+
+      <label for="disability">Disability status</label>
+      <select id="disability" name="disability">
+        <option value="">Select…</option>
+        <option value="no">No, I do not have a disability</option>
+      </select>
+
+      <label for="dob">Date of birth</label>
+      <input type="text" id="dob" name="dateOfBirth" />
+
+      <label for="salary">Expected salary</label>
+      <input type="text" id="salary" name="salary_expected" />
+
+      <label for="citizenship">Country of citizenship</label>
+      <input type="text" id="citizenship" name="citizenship" />
+
+      <label for="sponsorship">Will you now or in the future require sponsorship?</label>
+      <input type="text" id="sponsorship" name="sponsorship" />
+
+      <label for="felony">Have you ever been convicted of a felony?</label>
+      <input type="text" id="felony" name="criminal" />
+
+      <!-- Workday's named honeypots, reproduced here so the denylist is
+           exercised on a board that does not actually ship them. -->
+      <div class="trap-display">
+        <label for="beecatcher">This input is for robots only, do not enter if you're human.</label>
+        <input type="text" id="beecatcher" name="beecatcher" data-automation-id="beecatcher" />
+      </div>
+      <div class="trap-offscreen">
+        <label for="hp-website">Website</label>
+        <input type="text" id="hp-website" name="website2" />
+      </div>
+
+      <!-- Six hidden techniques, none of them named like a honeypot. The
+           denylist cannot catch these; the visibility gate has to. -->
+      <div class="trap-display"><input type="text" name="trap_display" /></div>
+      <div class="trap-visibility"><input type="text" name="trap_visibility" /></div>
+      <div class="trap-opacity"><input type="text" name="trap_opacity" /></div>
+      <div class="trap-offscreen"><input type="text" name="trap_offscreen" /></div>
+      <div class="trap-tiny"><input type="text" name="trap_tiny" /></div>
+      <div class="trap-clipped"><input type="text" name="trap_clipped" /></div>
+      <input type="hidden" name="trap_hidden_input" />
+
+      <button type="submit">Submit application</button>
+    </form>
+
+    <script>
+      // The submit counter invariant 1 is measured against. Nothing else on
+      // this page prevents a submit, so a non-zero count is a real failure.
+      window.__submits = 0;
+      document.getElementById('application').addEventListener('submit', (e) => {
+        e.preventDefault();
+        window.__submits += 1;
+      });
+    </script>
+  </body>
+</html>
