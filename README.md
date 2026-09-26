@@ -1,4 +1,4 @@
-# Nibble
+# PageMyCV
 
 **A local-first browser bot that fills job application forms from your own CV.
 It fills. You review. You submit.**
@@ -6,8 +6,8 @@ It fills. You review. You submit.**
 > The name is a placeholder. See [`docs/00-name.md`](docs/00-name.md) for the
 > shortlist and how to change it in one command.
 
-Nibble is the browser half of [Byte](https://github.com/elvisxd/byte). Byte finds
-the job, scores it against your profile and writes the text. Nibble is the hand
+PageMyCV is the browser half of [Byte](https://github.com/elvisxd/byte). Byte finds
+the job, scores it against your profile and writes the text. PageMyCV is the hand
 that types it into the form and then stops.
 
 **Status: planning.** No code yet. This repository currently holds the design,
@@ -21,7 +21,7 @@ with before a line is written.
 There are five serious ones already. Every single one of them keeps your
 résumé on their servers.
 
-| | The incumbents | Nibble |
+| | The incumbents | PageMyCV |
 |---|---|---|
 | Where your CV lives | Their cloud | Your machine |
 | Who can read it | Them, and anyone who breaches them | You |

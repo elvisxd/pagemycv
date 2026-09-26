@@ -1,53 +1,63 @@
 # The name
 
-**Current placeholder: `Nibble`.** Nothing is committed. Pick one and the whole
-repository follows with a single command.
+**Decided: `PageMyCV`.** Chosen on availability evidence, not taste. It was the
+first instinct and it turned out to be the only candidate that survives a
+collision check.
 
-## Shortlist
+## What the search found
 
-| Name | The idea | For | Against |
-|---|---|---|---|
-| **Nibble** ★ | A nibble is half a byte. Byte is the agent, Nibble is the small browser companion. | Short, says bot, and pairs with Byte into a story a recruiter remembers. Easy to say in an interview. | Does not describe what it does. Needs one sentence of explanation. |
-| **PageMyCV** | Your own instinct. It pages your CV into the form. | Nobody has to ask what it does. | Four syllables, awkward to say, reads like a 2011 web app. Hard to turn into a mark. |
-| **Understudy** | The actor who stands in for you and never takes the stage. | Conceptually exact: it prepares, you perform. Memorable and unusual. | Long. Ten letters and three syllables in a side panel header. |
-| **Carbon** | A carbon copy of your CV, pressed into a form. | Elegant, one word, good mark. Ties to paper without being twee. | Heavily used. Collides with a design system and a blockchain project. |
-| **Clip** | The paperclip that attaches your CV. | Shortest option. Obvious icon. | Generic. Faint echo of Clippy, which cuts both ways. |
-| **Stub** | In code, a stub stands in where the real thing goes. | Developer audience gets it instantly. | Connotation of incomplete. A recruiter reads it as unfinished. |
+Checked on 26 September 2026: Chrome Web Store presence, product and trademark
+collisions, npm, and DNS resolution for `.app`, `.dev` and `.com`.
 
-★ My recommendation. The Byte and Nibble pairing gives you two repositories that
-obviously belong to the same mind, which is worth more on a portfolio than a
-name that self-describes.
+| Name | Store | Product collision | npm | Domains | Verdict |
+|---|---|---|---|---|---|
+| **PageMyCV** | Nothing found | One small open-source Flask project, no company, no mark | **Free** | **All three free** | **Chosen** |
+| Understudy | Competitor's own extension | **`understudy.live`, a Chrome extension that applies to jobs for you** | Taken | All taken | Eliminated |
+| Carbon | Exact match exists | IBM Carbon Design System, Google's Carbon language, `carbon.now.sh`, Carbon Health, Carbon Black | Taken | All taken | Eliminated |
+| Nibble | **Exact match exists** | Nibble, an AI negotiation platform with a real brand | Taken | `.app` and `.com` taken | Rejected |
+| Clip | Namespace saturated | OpenAI's CLIP, Clip Studio Paint, Clipchamp | Taken | All taken | Eliminated |
+| Stub | Nothing found | StubHub, plus "stub" means incomplete to developers | Taken | All taken | Weak |
 
-## Not checked
+**Understudy is the finding that mattered.** There is already a Chrome extension
+called Understudy whose entire pitch is applying to jobs for you, including
+Workday. Same name, same form factor, same category. Shipping under that name
+would have been indistinguishable from a direct competitor.
 
-I could not verify availability of any of these on npm, the Chrome Web Store or
-as a domain from this environment. Check before you commit to a mark:
+**Nibble was my recommendation and it did not survive.** There is an existing
+Chrome Web Store extension called exactly Nibble, and a company called Nibble
+selling AI negotiation software. Neither is fatal on its own. Together they make
+a name that has to be defended rather than used.
 
-- Chrome Web Store: search the name, extensions do not need a unique name but a
-  collision hurts you
-- npm: only matters if you ever publish a package
-- Domain: `.dev` or `.app` if you want a privacy-policy page, which the Chrome
-  Web Store requires if you ever publish
+Six further candidates were checked and every one was taken on npm and on at
+least two domains: `formwork`, `quire`, `longhand`, `mimeo`, `carbonless`,
+`onionskin`.
+
+## The honest downside
+
+`PageMyCV` is descriptive, which means it is hard to trademark and it will never
+be a distinctive mark. It also says "CV", which skews British and international,
+while United States job postings say "resume". Both are real costs.
+
+They are smaller than the cost of launching next to a same-category competitor
+with the same name, and smaller than the cost of not owning the namespace.
+
+## Before spending money on it
+
+Three checks could not be completed from a sandboxed environment and are worth
+ten minutes of yours:
+
+- [ ] **Chrome Web Store search by hand.** Store search returns 403 through a
+      proxy, so "nothing found" came from indexed search rather than the store.
+- [ ] **Registrar check.** Domain status was inferred from DNS alone. A name that
+      does not resolve is probably free but not provably so.
+- [ ] **Trademark search** on USPTO for the final name, if you ever monetise.
 
 ## Renaming
 
-Everything in this repository refers to the name in exactly one form. To change it:
+Everything refers to the name in exactly two forms, `PageMyCV` and `pagemycv`.
 
 ```bash
-# from the repository root
-OLD=Nibble NEW=Understudy
-grep -rl "$OLD" --exclude-dir=.git . | xargs sed -i '' "s/$OLD/$NEW/g"       # macOS
-grep -rl "$OLD" --exclude-dir=.git . | xargs sed -i    "s/$OLD/$NEW/g"       # Linux
-
-# lowercase form, for package names and folders
-grep -rl "nibble" --exclude-dir=.git . | xargs sed -i '' "s/nibble/understudy/g"
+OLD=PageMyCV NEW=Whatever
+grep -rl "$OLD" --exclude-dir=.git . | xargs sed -i "s/$OLD/$NEW/g"
+grep -rl "pagemycv" --exclude-dir=.git . | xargs sed -i "s/pagemycv/whatever/g"
 ```
-
-Then rename the repository on GitHub under Settings. Old links keep redirecting,
-so nothing breaks.
-
-## Decision
-
-- [ ] Name chosen: ______________
-- [ ] Repository renamed on GitHub
-- [ ] Availability checked

@@ -13,13 +13,17 @@ CV on Google's servers, which is exactly what this project exists to avoid.
 |---|---|---|
 | OPFS via SQLite | Everything that matters | Quota, lifted by `unlimitedStorage` |
 | `chrome.storage.local` | The Byte endpoint URL, UI preferences | 10 MB |
-| `chrome.storage.session` | Unlock state for the session, in memory only | 10 MB |
+| `chrome.storage.session` | Unlock state for the session, in memory only, never on disk | 10 MB |
 | `chrome.storage.sync` | **Never used** | — |
 
 ## Conventions
 
 - A column ending in `_enc` holds an AES-GCM ciphertext blob. Never readable
-  without the passphrase.
+  without the passphrase. Every one is encrypted with
+  `additionalData = rowId + "." + columnName + "." + schemaVersion`, so a
+  ciphertext cannot be moved between rows or columns. See `03-security.md`.
+- Low-entropy sensitive columns are padded to a fixed block before encryption,
+  because ciphertext length otherwise reveals the value.
 - Every table carries `created_at` and `updated_at` as Unix epoch seconds.
 - Nothing is ever hard-deleted from `application` or `event_log`. A rejected
   application you cannot find is an employer you write to twice.
@@ -33,8 +37,8 @@ CV on Google's servers, which is exactly what this project exists to avoid.
 -- One row. Holds the key-derivation parameters and a verifier, never the key.
 CREATE TABLE vault (
   id              INTEGER PRIMARY KEY CHECK (id = 1),
-  kdf             TEXT    NOT NULL DEFAULT 'PBKDF2-HMAC-SHA256',
-  iterations      INTEGER NOT NULL DEFAULT 600000,
+  kdf             TEXT    NOT NULL DEFAULT 'argon2id',
+  kdf_params      TEXT    NOT NULL DEFAULT '{"m":19456,"t":2,"p":1}',
   salt            BLOB    NOT NULL,
   verifier_enc    BLOB    NOT NULL,   -- a known plaintext, encrypted
   created_at      INTEGER NOT NULL,

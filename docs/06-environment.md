@@ -2,30 +2,103 @@
 
 ## Stack
 
-Options are listed where a real choice exists. A star marks my recommendation.
+Every row below was re-checked against the current registry on 26 September
+2026. Two picks changed as a result, and they are marked.
 
-| Layer | Recommendation | Alternatives considered |
+| Layer | Pick | Note |
 |---|---|---|
 | Runtime | Node 22 LTS | — |
-| Package manager | **pnpm** ★ | npm is fine, slower and heavier on disk |
-| Extension framework | **WXT** ★ | Plasmo, still on Parcel; CRXJS, Chromium only |
+| Package manager | pnpm | — |
+| Extension framework | **WXT** | Still the leading choice. Plasmo has shipped nothing since May 2025. |
 | Language | TypeScript, `strict: true` | — |
-| UI | **React 19** ★, the stack you already work in | Preact cuts about 30 KB, at the cost of a different mental model |
-| Styling | **Tailwind v4** ★ | CSS modules, more typing and no design tokens for free |
-| Database | `@sqlite.org/sqlite-wasm`, `opfs-sahpool` VFS | See `02-architecture.md` |
-| Lint and format | **Biome** ★, one tool, one config, very fast | ESLint plus Prettier, two tools and more configuration |
-| Unit tests | Vitest | — |
-| End-to-end | Playwright, against local fixtures | — |
+| UI | **Preact 10 via `preact/compat`** ← changed | Was React 19. See below. |
+| Styling | Tailwind v4 | Radix Colors mapped through `@theme` |
+| Colour | `@radix-ui/colors` ← added | See `07-design.md` |
+| Database | `@sqlite.org/sqlite-wasm`, `opfs-sahpool` VFS, driven directly | Do not use a wrapper. See below. |
+| Passphrase KDF | `@openpgp/argon2id` ← added | Under 7 KB, WASM inlined. See `03-security.md`. |
+| Messaging | `@webext-core/messaging` v4 ← added | Typed messages across all four contexts |
+| Lint and format | Biome | One package, one binary set, lint and format together |
+| Unit tests | Vitest, with WXT's bundled `@webext-core/fake-browser` | An in-memory `chrome.*`, so most logic needs no browser |
+| End-to-end | Playwright | With one real limitation, below |
 | CI | GitHub Actions | — |
 
-**Why Biome over ESLint here specifically.** The dependency surface is part of
-the threat model. One tool with no plugin ecosystem is fewer packages that can
-run code at install time.
+### Changed: React 19 becomes Preact 10
+
+Measured, same counter app, Vite 8, minified and gzipped:
+
+| | gzipped |
+|---|---|
+| SolidJS | 4.3 KB |
+| **Preact 10** | **5.7 KB** |
+| Svelte 5 | 10.1 KB |
+| React 19 with react-dom | 67.7 KB |
+
+**The reason is the side panel's lifecycle, not ideology.** A side panel is torn
+down and re-instantiated every time the user opens it, unlike a page application
+that boots once. React's roughly 215 KB of parse and execute is paid on every
+single open, and a 360 pixel list of chips uses none of what that weight buys.
+
+`preact/compat` keeps the React API and the React ecosystem, and WXT supports it.
+
+**Verify before aliasing:** Preact's React 19 surface is incomplete. `use()` and
+`useActionState` have open issues. If the panel ends up using React 19 Actions,
+check them first. Target Preact 10.29.x, not the 11 release candidate.
+
+### Kept, after checking the alternative: SQLite driven directly
+
+**SQLocal looked like it would save the worker plumbing. It would have broken
+the architecture.** Its source has zero occurrences of `sahpool`; it uses the
+`opfs` VFS, which needs `SharedArrayBuffer`, which needs cross-origin isolation.
+
+Three consequences, any one of which is disqualifying:
+
+- Cross-origin isolation keys apply to **every** extension page, so the side
+  panel would have to serve a policy header for every cross-origin image it
+  loads.
+- The service worker cannot be cross-origin isolated even with the keys set.
+- It pins an older SQLite than the current release.
+
+`wa-sqlite` is lower level, not higher. `sqlite-wasm-http` solves a different
+problem and is dead. Drizzle has no sqlite-wasm driver at all; if an ORM is ever
+wanted, `drizzle-orm/sqlite-proxy` layers over the existing worker without
+touching the VFS.
+
+The hundred lines of message plumbing is the right price.
+
+### Kept, after checking the alternative: Biome
+
+oxlint is genuinely faster and its type-aware rules are ahead, now covering 59 of
+typescript-eslint's 61. But replacing Biome means three packages instead of one,
+44 platform binaries instead of 8, and `oxfmt` is still alpha, so Prettier would
+have to stay. Dependency surface is part of the threat model here. Revisit when
+`oxfmt` reaches 1.0.
+
+### Two limitations to design around
+
+**WXT does not treat offscreen documents as first class.** The word does not
+appear anywhere in the package. Side panels are first class and get their
+permission and manifest entry generated; the offscreen document is created as an
+unlisted page, with the permission added by hand and `chrome.offscreen.
+createDocument()` called by hand. Since the entire database layer lives there,
+budget for writing that glue. WXT is also still pre-1.0, so minor versions can
+break.
+
+**Playwright cannot drive the real side panel.** The feature request has been
+open since 2023. The workaround costs almost nothing: navigate an ordinary page
+to `chrome-extension://<id>/sidepanel.html`, which is the same document with the
+same component tree and the same messaging, just not hosted in the browser's
+panel chrome.
+
+One more Playwright trap worth knowing before it wastes an afternoon: when Chrome
+suspends the service worker after 30 seconds and restarts it, Playwright keeps
+the same worker object and emits no new event. Any in-memory global silently
+vanishes. **Assert service-worker state through `chrome.storage`, never through
+globals.**
 
 ## Folder layout
 
 ```
-nibble/
+pagemycv/
 ├── docs/                      # this planning set
 ├── src/
 │   ├── entrypoints/           # WXT convention, one file per extension context

@@ -18,7 +18,11 @@ Two shortcuts:
 
 - [`DECISIONS.md`](DECISIONS.md) — every open choice in one list, with a
   recommendation for each
-- [`00-name.md`](00-name.md) — the name shortlist and the rename command
+- [`00-name.md`](00-name.md) — why the name is what it is, and how to change it
+
+One directory worth knowing about: `vendor/chromium-autofill/` holds Chrome's own
+form-field classifier, 361 patterns under a BSD licence, which does most of the
+work in `09-ats.md` pass two.
 
 ## How to read this
 

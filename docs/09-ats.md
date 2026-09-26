@@ -125,6 +125,38 @@ None of them fills automatically, ever.
 
 ---
 
+## Chromium's own field classifier
+
+Before writing a single label heuristic, use Chrome's. The patterns are vendored
+at `vendor/chromium-autofill/`, under BSD-3-Clause.
+
+It is the classifier Chrome runs in production against the entire web: 83 field
+types, 361 positive patterns, each with a negative pattern that rejects false
+matches, in up to 16 locales. Hand-rolled heuristics always forget the negative
+half.
+
+**Covers** names, street address down to house number, city, state, postal code,
+country, phone split into country code, area code, prefix, suffix and extension,
+email, and company name.
+
+**Covers nothing job-specific.** The full type list was checked: no work history,
+no education, no visa status, no salary, no demographics. Those stay ours.
+
+**Replicate one guard:** Chrome applies these heuristics only when a form has at
+least three fields classified with distinct types. Without it they fire on search
+boxes.
+
+So field detection is four passes, not three:
+
+| Pass | Source | Roughly |
+|---|---|---|
+| 1 | The `autocomplete` attribute | 10 fields, when the form is marked up well |
+| 2 | Chromium's patterns | Identity, address and phone, even on badly marked-up forms |
+| 3 | The per-ATS map above | The fields each ATS names in its own way |
+| 4 | Our own label heuristics | Work history, education, authorization, demographics |
+
+---
+
 ## The `autocomplete` standard, and its ceiling
 
 Use it as the first and highest-confidence pass. Know what it does not cover.

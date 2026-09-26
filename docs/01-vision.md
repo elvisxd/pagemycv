@@ -32,7 +32,7 @@ What Byte deliberately does not do is apply. From its own module docstring:
 > Nada de acá postula por vos. Junta links, los ordena por qué tan cerca están
 > de tu perfil y te los manda; abrir el link y aplicar es tuyo.
 
-Nibble does not change that stance. It removes the typing, not the decision.
+PageMyCV does not change that stance. It removes the typing, not the decision.
 
 ## Who it is for
 

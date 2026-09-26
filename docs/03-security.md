@@ -146,29 +146,98 @@ fill of a local fixture.
 ## Encryption at rest
 
 **What is encrypted.** Sensitive columns, not the whole file. Column-level
-AES-GCM keeps the rest of the database queryable, which matters because you want
-to search your own application history without unlocking the vault.
+encryption keeps the rest of the database queryable, which matters because you
+want to search your own application history without unlocking the vault.
 
 **Scheme.**
 
 | | |
 |---|---|
 | Cipher | AES-GCM, 256-bit, via WebCrypto |
-| Key derivation | PBKDF2-HMAC-SHA-256, 600,000 iterations, 16-byte random salt |
-| Key storage | Never. Held in the worker's memory only, for the session. |
+| Key derivation | **Argon2id**, `m = 19 MiB`, `t = 2`, `p = 1`, the current OWASP configuration |
+| Argon2 implementation | `@openpgp/argon2id`, under 7 KB gzipped with the WASM inlined |
+| Key storage | **Never.** Derived with `extractable: false`, held in the offscreen document for the session. |
 | IV | 12 random bytes per value, stored alongside the ciphertext |
-| Additional authenticated data | The column name, so a ciphertext cannot be moved between columns |
+| Additional authenticated data | `rowId ‖ columnName ‖ schemaVersion` |
 
-**Honest limits, stated rather than glossed.**
+### Why Argon2id and not PBKDF2
 
-- OPFS itself is not encrypted. An attacker with your unlocked machine and
-  another extension that has `unlimitedStorage` cannot read our origin, but an
-  attacker with disk access reads every unencrypted column.
-- A passphrase in memory is readable by anything that can debug the browser
-  process. This protects a copied disk, not a compromised machine.
-- Argon2id would be better than PBKDF2, but it needs a WASM dependency. PBKDF2
-  at 600k iterations is native, audited and adequate for this threat model. Flag
-  it as a revisit, not a gap.
+The first draft specified PBKDF2 at 600,000 iterations. Research says that
+number is still current OWASP guidance and was reaffirmed three separate times
+during 2026, so it is defensible. But OWASP ranks PBKDF2 **last**, as the
+FIPS-140 escape hatch, and recommends Argon2id first.
+
+The reason it matters here specifically: PBKDF2 has no memory hardness, and the
+threat this scheme exists for is an offline attack on a stolen database
+containing a name, an address, a phone number and a visa status. That data is
+long-lived and cannot be rotated after a breach. Argon2id at the OWASP
+configuration buys roughly three orders of magnitude of resistance to a GPU
+attack, for the same unlock latency, at a cost of under 7 KB.
+
+The manifest already carries `wasm-unsafe-eval` for SQLite, so the WASM adds no
+new policy surface.
+
+**Store the KDF identifier and its parameters in the vault header.** Migrating
+later without a flag day depends on it.
+
+### The AAD is not optional
+
+**Every column is encrypted under the same key, so without binding, every
+ciphertext decrypts correctly in every position.** An attacker with write access
+to the database file could move the `visa_status` ciphertext into another row,
+or swap `phone` into `address`, and AES-GCM would authenticate all of it.
+
+Passing `additionalData = utf8(rowId + "." + columnName + "." + schemaVersion)`
+on both encrypt and decrypt closes that. It costs nothing and it is the single
+highest-value line in this document.
+
+### Length leaks, and the fix
+
+Ciphertext length reveals plaintext length. For a low-entropy column such as
+work authorization status, where the set of possible values is small and each
+has a distinct length, the length **is** the value.
+
+Pad every sensitive column to a fixed block before encrypting.
+
+### The key never gets persisted, including as a CryptoKey
+
+A non-extractable `CryptoKey` can be stored in IndexedDB and never handed back as
+bytes. That is a real pattern, and it is **the wrong pattern here**: a persisted
+key survives restarts, so anyone with the browser profile directory could decrypt
+the CV without ever knowing the passphrase. It would nullify the entire scheme.
+
+Derive per session. Hold it in the offscreen document, which is where the
+database already lives and which outlives the service worker.
+
+`chrome.storage.session` is the sanctioned place for session secrets, held in
+memory and never written to disk. **Whether it round-trips a non-extractable
+`CryptoKey` is unverified** and is a Phase 0 spike. If it does not, the offscreen
+document holds the key in a module variable, which is the fallback anyway.
+
+### Honest limits, stated rather than glossed
+
+- Non-extractable keys are obfuscation, not a security boundary. W3C says so
+  directly. They stop accidental serialisation into a log and unsophisticated
+  theft. They do not stop an attacker already running in the process.
+- Ignore any claim that browser keys are backed by a TPM or Secure Enclave.
+  Hardware-backed WebCrypto is an unimplemented proposal.
+- This protects a copied disk. It does not protect a compromised machine.
+- The nonce budget is a non-issue. Random 96-bit IVs allow about 4.29 billion
+  encryptions per key; a lifetime of heavy use reaches well under one percent of
+  that. Use a fresh random IV per value and stop thinking about it.
+- **Never switch to a counter-based IV.** Restoring a backup would rewind the
+  counter and reuse an IV under the same key, which for AES-GCM leaks plaintext
+  and enables forgery.
+
+### Considered and rejected
+
+| | Why not |
+|---|---|
+| XChaCha20-Poly1305 | Only reachable through libsodium. AES-GCM is hardware-accelerated everywhere this runs. |
+| Waiting for native ChaCha20-Poly1305 | It arrives in Chrome 155, but it is the 96-bit-nonce variant, so it offers nothing AES-GCM does not. |
+| Waiting for native Argon2id | In the WICG draft, but it was not in Chrome's intent to ship. No date. |
+| libsodium.js | The Argon2 build is about 375 KB, roughly fifty times the cost of the alternative. |
+| age or typage | A file format. Wrapping a 20-byte phone number in a file header is the wrong shape, and its passphrase mode uses scrypt. |
 
 ## Chrome Web Store compliance
 

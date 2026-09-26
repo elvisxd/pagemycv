@@ -41,6 +41,11 @@ delete them afterwards.
 4. **Can the extension reach Byte on loopback?** Chrome 142 enforces Local
    Network Access. Extensions are reported to be exempt. Confirm it with a real
    fetch from the service worker to `http://127.0.0.1:8000/health`.
+5. **Does `chrome.storage.session` round-trip a non-extractable `CryptoKey`?**
+   IndexedDB is confirmed to; this is not. Test in real Chrome, never in a
+   polyfill, because `fake-indexeddb` cannot reproduce the real behaviour. If it
+   fails, the offscreen document holds the key in memory, which is the fallback
+   regardless.
 
 **Gate.** All four answered in writing, in this document, with the answer and
 the date. If spike 3 shows closed shadow roots that `chrome.dom` cannot pierce,
@@ -55,16 +60,20 @@ of this phase, not even unused.
 
 - SQLite running through the offscreen chain, with migrations
 - The schema from `05-data.md`
-- Column-level AES-GCM, key derived from a passphrase, never persisted
+- Column-level AES-GCM with AAD binding each ciphertext to its row, column and
+  schema version, without which any ciphertext can be moved to any other column
+- Argon2id from `@openpgp/argon2id`, derived with `extractable: false`, held in
+  the offscreen document, never written anywhere
 - Lock and unlock, with an idle auto-lock
 - Import from `perfil/cv.md`, parsed into structured rows
 - The sensitive field registry, seeded
 - Side panel showing the profile, read-only
 
 **Gate.** Quit Chrome, reopen, unlock with the passphrase, see the profile. Then
-inspect the OPFS file with the extension locked and confirm the sensitive
-columns are ciphertext. Plus: a test asserting zero network calls in the whole
-bundle.
+inspect the database file with the extension locked and confirm the sensitive
+columns are ciphertext. Two more tests: one asserting zero network calls in the
+whole bundle, and one that moves a ciphertext from one column to another and
+asserts decryption **fails**, which is what proves the AAD is really there.
 
 ---
 
@@ -73,17 +82,19 @@ bundle.
 The easy case, deliberately. Plain HTML, stable ids like `#first_name`, open job
 APIs, no anti-automation clause found.
 
-- Field detection in three passes: the `autocomplete` token first, then label
-  text heuristics, then give up and mark the field unresolved
+- Field detection in four passes: the `autocomplete` token, then Chromium's
+  vendored patterns, then the per-ATS map, then our own label heuristics for the
+  job-specific fields nobody else covers. Anything unresolved is marked, not
+  guessed.
 - The honeypot denylist and the computed visibility check, from day one, even
   though these two ATS do not need them
 - Fill, highlight every value written, show a review list
 - Never submit
 - The CV file attached to the file input, via a main-world `DataTransfer`
 
-The `autocomplete` standard gives you about ten fields of a forty-field
-application. There is no standard token for work history, education, visa status
-or demographics. Do not plan around it carrying more than it does.
+The first two passes cover identity, address and phone well. Neither covers work
+history, education, visa status or demographics, which is most of a job
+application. Do not plan around them carrying more than they do.
 
 **Gate.** A real Lever application and a real Greenhouse application, both
 filled, both reviewed, both submitted by hand. Zero sensitive fields filled

@@ -1,4 +1,4 @@
-# Nibble — working agreement
+# PageMyCV — working agreement
 
 A browser extension that fills job application forms from a locally stored CV.
 It fills, the human reviews, the human submits.
@@ -33,7 +33,7 @@ design change, not a refactor, and needs a conversation first.
 | `src/fill/write.ts` | The only module that writes to the DOM |
 | `src/byte/client.ts` | The only module that calls `fetch` |
 | `src/db/worker.ts` | The only module that touches SQLite |
-| `src/vault/crypto.ts` | The only module that touches `crypto.subtle` |
+| `src/vault/crypto.ts` | The only module that touches `crypto.subtle` and Argon2 |
 
 `scripts/guard.mjs` enforces all four with grep-level checks. If a check fails,
 fix the code, never the check.
@@ -51,6 +51,11 @@ and re-deriving them wastes a session.
 - Broad host permissions are optional and requested on a user gesture. Google
   enforces minimum permissions as a hard requirement since 1 August 2026.
 - Byte returns a flat map of string values. Never selectors, never actions.
+- Every AES-GCM call passes AAD binding the ciphertext to its row, column and
+  schema version. A call without it is a bug, not a simplification.
+- The vault key is never persisted anywhere, including as a non-extractable
+  CryptoKey in IndexedDB. That pattern is for device-bound session keys and would
+  let anyone with the browser profile decrypt the CV without the passphrase.
 
 ## Conventions
 

@@ -1,96 +1,71 @@
-# Open decisions
+# Decisions
 
-Everything waiting on you, in one list. A star marks my recommendation and the
-reasoning lives in the linked document. Tick a box, write the choice, and the
-rest of the repository follows.
+Eighteen choices were open. **Research closed twelve of them and overturned four
+of my own recommendations.** What remains open is at the bottom.
 
-## Identity
+## Overturned by research
 
-| # | Decision | Options | Mine |
+These were my recommendations. Evidence beat them.
+
+| | I said | Research said | Now |
 |---|---|---|---|
-| 1 | **Name** — see [`00-name.md`](00-name.md) | Nibble / PageMyCV / Understudy / Carbon / Clip / Stub | **Nibble** ★ |
-| 2 | **Repository visibility** | Public, like Byte / Private until Phase 2 | **Public** ★, the build history is the portfolio |
-| 3 | **Documentation language** | English throughout / English README with Spanish internals, like Byte | **English** ★, you asked for English and recruiters read it |
+| **Name** | Nibble | An extension called exactly Nibble already exists, plus a company called Nibble selling AI negotiation software. **Understudy** is worse: a Chrome extension of that exact name already applies to jobs for you. | **PageMyCV**, the only candidate with npm and all three domains free |
+| **Palette** | Hand-rolled, Primer-derived hex | Hand-rolling costs the maintenance of a system with none of the guarantees | **Radix Colors** through CSS variables into Tailwind's `@theme` |
+| **State colours** | Green for filled, amber for review | Under deuteranopia those two appear nearly identical, and they are the two most frequent states in the list | **Blue and orange**, the axis robust across all common colour vision deficiencies |
+| **Key derivation** | PBKDF2 at 600,000 | Still current OWASP guidance, but OWASP ranks it last, as the FIPS escape hatch. No memory hardness against a GPU attack on stolen data that can never be rotated. | **Argon2id** at `m=19 MiB, t=2, p=1`, under 7 KB |
+| **UI library** | React 19 | Measured 67.7 KB gzipped against Preact's 5.7 KB, and a side panel is rebuilt on every open | **Preact 10** through `preact/compat` |
 
-- [ ] 1. Name: ______________
-- [ ] 2. Visibility: ______________
-- [ ] 3. Language: ______________
+## Confirmed after checking the alternative
 
-## Design — see [`07-design.md`](07-design.md)
-
-| # | Decision | Options | Mine |
-|---|---|---|---|
-| 4 | **Palette** | A, ink and indigo / B, Byte family amber / C, monochrome | **A** ★. B forces the review state off amber, which costs more than the sibling story is worth. |
-| 5 | **Typeface** | System stack / Inter bundled locally, about 30 KB | **System stack** ★, a web font is a network request and the panel should open instantly |
-| 6 | **Icon** | Bitten square / Cursor in a field / Bracket with caret | **Bitten square** ★ if the name stays Nibble |
-| 7 | **Default theme** | Follow the system / Always dark | **Follow the system** ★ |
-
-- [ ] 4. Palette: ______________
-- [ ] 5. Typeface: ______________
-- [ ] 6. Icon: ______________
-- [ ] 7. Theme: ______________
-
-## Stack — see [`06-environment.md`](06-environment.md)
-
-| # | Decision | Options | Mine |
-|---|---|---|---|
-| 8 | **UI library** | React 19 / Preact, about 30 KB smaller | **React 19** ★, it is your stack and the panel is not size-constrained |
-| 9 | **Lint and format** | Biome, one tool / ESLint plus Prettier | **Biome** ★, fewer packages is part of the threat model |
-| 10 | **Package manager** | pnpm / npm | **pnpm** ★ |
-
-- [ ] 8. UI: ______________
-- [ ] 9. Lint: ______________
-- [ ] 10. Package manager: ______________
-
-## Security — see [`03-security.md`](03-security.md)
-
-| # | Decision | Options | Mine |
-|---|---|---|---|
-| 11 | **Key derivation** | PBKDF2 at 600k iterations, native / Argon2id, needs a WASM dependency | **PBKDF2** ★ for now. Argon2id is better and costs a dependency. Revisit at Phase 6. |
-| 12 | **Encryption scope** | Sensitive columns only / The whole database file | **Columns** ★, so history stays searchable while locked |
-| 13 | **Auto-lock** | 15 minutes idle / On browser close / Never | **15 minutes** ★ |
-| 14 | **Demographic questions** | In the sensitive class / Fill from stored answers | **Sensitive** ★, declining is a protected choice and should stay yours each time |
-
-- [ ] 11. KDF: ______________
-- [ ] 12. Scope: ______________
-- [ ] 13. Auto-lock: ______________
-- [ ] 14. Demographics: ______________
-
-## Scope — see [`04-phases.md`](04-phases.md) and [`09-ats.md`](09-ats.md)
-
-| # | Decision | Options | Mine |
-|---|---|---|---|
-| 15 | **First ATS** | Lever alone / Lever and Greenhouse together | **Both** ★, they are similar enough that the second is nearly free |
-| 16 | **LinkedIn and Indeed** | Out of scope / Support anyway | **Out of scope** ★, the risk lands on your account |
-| 17 | **Chrome Web Store** | Developer mode only / Publish after Phase 4 | **Developer mode** ★ until Phase 4's gate passes |
-| 18 | **Byte transport** | `gh codespace ports forward` to loopback / A public forwarded port | **Loopback** ★, a public Codespaces port has no authentication at all |
-
-- [ ] 15. First ATS: ______________
-- [ ] 16. LinkedIn and Indeed: ______________
-- [ ] 17. Store: ______________
-- [ ] 18. Transport: ______________
-
----
-
-## Answered by research, not open
-
-Recorded here so they do not get reopened by accident.
-
-| | Answer | Source |
+| | Alternative considered | Why it lost |
 |---|---|---|
-| Language of a browser extension | JavaScript only, TypeScript compiled. Byte can never run inside it. | [`02-architecture.md`](02-architecture.md) |
-| Can SQLite run in the extension | Yes, but only offscreen document then dedicated worker then `opfs-sahpool`. Never the service worker. | [`02-architecture.md`](02-architecture.md) |
-| Does the extension need COOP and COEP | No, `opfs-sahpool` avoids them, and opting in would break other requests | [`02-architecture.md`](02-architecture.md) |
-| Is calling an LLM backend allowed under Manifest V3 | Yes for data, never for instructions the extension interprets | [`03-security.md`](03-security.md) |
-| Do unlisted or private listings skip review | No. Same review, same policies. | [`03-security.md`](03-security.md) |
-| Is there a honeypot to avoid | Yes. Workday's `beecatcher`, plus a `website` field. | [`09-ats.md`](09-ats.md) |
+| **WXT** | Extension.js, Plasmo, CRXJS | Plasmo has shipped nothing since May 2025. WXT holds, though offscreen documents are not first class and it is still pre-1.0. |
+| **sqlite-wasm driven directly** | SQLocal, wa-sqlite, Drizzle | SQLocal has zero support for the VFS we need, forces cross-origin isolation on every extension page, and pins an older SQLite |
+| **Biome** | oxlint | Faster with better type-aware rules, but three packages instead of one, 44 platform binaries instead of 8, and its formatter is still alpha |
+| **AES-GCM** | XChaCha20-Poly1305, native ChaCha20-Poly1305 | Hardware-accelerated everywhere this runs. The native variant landing in Chrome 155 uses the same nonce size, so it offers nothing. |
+| **Playwright** | — | Right tool. Cannot drive the real side panel, so test the panel document as an ordinary page. |
+| **System font stack** | Inter bundled locally | A web font is a network request, and the panel should open instantly |
 
-## Still unverified
+## Added by research
 
-These need a real browser and are Phase 0's entire job. See
-[`04-phases.md`](04-phases.md).
+| | |
+|---|---|
+| **Chromium's field classifier** | 83 types, 361 patterns with negative matches, 16 locales, BSD licensed. Vendored at `vendor/chromium-autofill/`. Field detection goes from three passes to four. |
+| **AAD on every encryption** | Without it, any ciphertext decrypts in any column, so an attacker with file access can relocate and swap encrypted fields. The single highest-value line in the security document. |
+| **`@webext-core/messaging`** | Typed messages across all four contexts, written by WXT's own author. The alternatives are stale since 2023 and dead since 2022. |
+| **WCAG 2.2 target size** | Every interactive target at least 24 by 24 pixels. In a dense list this is a likelier compliance gap than colour. |
+| **A colour-vision theme** | About thirty lines of token override, and the highest-leverage accessibility feature available here |
+| **Padding low-entropy columns** | Ciphertext length reveals plaintext length. For work authorization status, the length is the value. |
+
+## Still open, and genuinely yours
+
+| # | Decision | Options | Mine |
+|---|---|---|---|
+| 1 | **Repository visibility** | Public, like Byte / Private until Phase 2 | **Public** ★ |
+| 2 | **Icon** | Caret in a field / Page with a caret / Bracket with a caret | **Caret in a field** ★ |
+| 3 | **Default theme** | Follow the system / Always dark | **Follow the system** ★ |
+| 4 | **Auto-lock** | 15 minutes idle / On browser close / Never | **15 minutes** ★ |
+| 5 | **First ATS** | Lever alone / Lever and Greenhouse together | **Both** ★ |
+
+- [ ] 1. Visibility: ______________
+- [ ] 2. Icon: ______________
+- [ ] 3. Theme: ______________
+- [ ] 4. Auto-lock: ______________
+- [ ] 5. First ATS: ______________
+
+## Still unverified, and Phase 0's whole job
+
+Needs a real browser. See [`04-phases.md`](04-phases.md).
 
 - [ ] Does `chrome.offscreen` accept the reason `WORKERS` on current Chrome
 - [ ] Does `opfs-sahpool` survive a full browser restart
 - [ ] Are Workday's shadow roots open or closed, and does `chrome.dom` reach them
 - [ ] Can the extension fetch loopback under Chrome 142's Local Network Access rules
+- [ ] Does `chrome.storage.session` round-trip a non-extractable `CryptoKey`
+
+## Worth ten minutes before spending money
+
+- [ ] Search the Chrome Web Store by hand for the final name. Store search is
+      blocked to automated tools, so "nothing found" came from indexed search.
+- [ ] Confirm the domains at a registrar. Availability was inferred from DNS.
+- [ ] A trademark search, if this is ever monetised.
