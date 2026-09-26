@@ -10,11 +10,30 @@ PageMyCV is the browser half of [Byte](https://github.com/elvisxd/byte). Byte fi
 the job, scores it against your profile and writes the text. PageMyCV is the hand
 that types it into the form and then stops.
 
-**Status: Phase 1 done.** The vault works: your CV is imported, encrypted and
-locked behind a passphrase, and the extension has no network code at all. It
-does not fill forms yet. That is Phase 2.
+**Status: Phase 2 done.** It fills Lever and Greenhouse applications from an
+encrypted local vault, attaches your résumé, highlights everything it wrote,
+and refuses to touch a sensitive field or a honeypot. It still has no network
+code at all. Next is Phase 3: the same forms embedded in an iframe on a
+company's own careers page, which is where most applications actually live.
 
-<img src="docs/media/panel-light.png" alt="The side panel showing an imported CV and the sensitive fields that are never filled automatically" width="360">
+| | |
+|---|---|
+| Sensitive fields filled automatically | **zero**, by construction |
+| Hidden fields written, across nine techniques | **zero** |
+| Forms submitted | **zero**, and there is no code that could |
+| Requests leaving your machine | **zero** |
+| Host permissions requested | **none** |
+
+<img src="docs/media/filled-form.png" alt="A Lever application form with seven fields filled and outlined in blue, the resume attached, and the Gender select still untouched" width="620">
+
+*A Lever application, filled. Everything it wrote is outlined. The search box
+at the top, the cover letter and every voluntary self-identification question
+below are untouched, and the Submit button was never pressed.*
+
+<img src="docs/media/fill-review.png" alt="The side panel review list: eight filled, nine left to you, two honeypots refused, twenty skipped, with a row per field saying why" width="360">
+
+*The review, field by field. Every refusal says which guard refused it and
+why.*
 
 ---
 
@@ -75,10 +94,19 @@ is exposed to dedicated workers alone, and a service worker cannot spawn one.
 
 ## Scope
 
-Supported first, because they are plain HTML with stable ids and publish open
-job APIs:
+**Working today**, because they are plain HTML with stable ids and publish
+open job APIs:
 
-`Lever` · `Greenhouse` · `Ashby`
+`Lever` · `Greenhouse`
+
+The extension runs on `jobs.lever.co`, `boards.greenhouse.io` and
+`job-boards.greenhouse.io`, and nowhere else. There are no host permissions:
+the content script's own match list is the entire grant, so the extension
+cannot read the address of a tab it is not running in.
+
+Ashby moved out of the first batch. It renders inside its own iframe, which
+makes it the same problem as an embedded Greenhouse form on a company's
+careers page — Phase 3, not Phase 2.
 
 Then, as its own phase, because it is a shadow-heavy single-page app with a bot
 honeypot, a click-intercepting overlay and a wizard whose length changes per
@@ -113,8 +141,8 @@ The risk lands on your account, not on this project. See
 ```bash
 pnpm install
 pnpm build            # then load .output/chrome-mv3 as an unpacked extension
-pnpm check            # typecheck, lint, 32 unit tests, and the invariant guard
-node tests/e2e/gate.cjs   # the Phase 1 gate, against a real browser
+pnpm check            # typecheck, lint, 226 unit tests, and the invariant guard
+node tests/e2e/gate.cjs   # the Phase 1 and 2 gates, against a real browser
 ```
 
 ## License

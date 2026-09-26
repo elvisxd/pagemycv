@@ -45,7 +45,17 @@ primitive. The content script never calls `form.submit()`, never dispatches a
 click on a `type="submit"` control, and never presses Enter in a text input.
 
 **Test.** A Playwright fixture with a form whose submit handler records a
-counter. Fill every field. Assert the counter is zero.
+counter. Fill every field. Assert the counter is zero. **Built and passing**
+on both Phase 2 boards.
+
+The enforcement is structural rather than remembered. `src/fill/write.ts` is
+the only module allowed to touch the page, `scripts/guard.mjs` fails the build
+if any other file assigns `.value`, `.files`, `.checked` or calls
+`setAttribute`, and that module contains no submit primitive: no
+`form.submit`, no `requestSubmit`, no click on a submit control, and no
+synthesized key event. The events it does dispatch are `input` then `change`,
+which is what a paste produces, and a paste is the closest honest analogy to
+what this does.
 
 ## Invariant 2: the sensitive field class
 
@@ -77,7 +87,31 @@ answers them makes that choice for you, permanently, across every application.
 
 **Test.** A fixture form containing one field from each category. Run a full
 fill. Assert every sensitive field is still empty and each produced exactly one
-pending confirmation.
+pending confirmation. **Built and passing:** nine sensitive fields on the Lever
+fixture and five on the Greenhouse one, all still empty after a full fill, each
+with its own row in the review list.
+
+**And re-checked at the moment of writing.** A plan crosses two message hops
+before it is executed, and a framework can reuse a DOM node while changing its
+attributes, so an element reference can still be live and no longer be the
+same field. Every write action carries a fingerprint — tag, type, name, id —
+that `src/fill/write.ts` re-derives from the element before touching it, plus
+an `isConnected` check. Without them the right value goes into the wrong box
+and is reported as a success. The guard fails the build if either check
+disappears.
+
+**Enforced by absence, not by filtering.** `readFillValues` in
+`src/db/worker.ts` builds the values object from a literal set of keys and
+does not read the `sensitive_value` table at all, so there is no ordering bug
+and no forgotten filter that could leak one: the value is never in the message
+the content script receives. The guard fails the build if anything under
+`src/fill/` or the content entrypoint so much as names a sensitive storage
+column, and if `readFillValues` ever queries that table.
+
+Detection runs **before** all four classification passes and beats them,
+because the collisions are real: *"Country of citizenship"* matches Chromium's
+`COUNTRY` pattern exactly, and `autocomplete="bday"` is a standard token for a
+field we refuse on purpose.
 
 ## Invariant 3: honeypots are never touched
 
@@ -98,7 +132,34 @@ robots only, do not enter if you're human."* A second honeypot uses the name
 Layer two exists because the next honeypot will not be called `beecatcher`.
 
 **Test.** A fixture with six hidden-field techniques and one named honeypot.
-Assert zero writes.
+Assert zero writes, **and assert which guard refused each one**. **Built and
+passing**, with nine techniques rather than six: `display:none`, `visibility:hidden`, `opacity:0`, off-screen positioning,
+a 1×1 box, a clip-path inset, `type="hidden"`, and the two named Workday
+honeypots. The gate also asserts the fixture really contains all nine, because
+a count of zero writes over zero traps passes by looking at nothing.
+
+"Zero writes" turned out not to be enough on its own. The first screenshot of
+the review list showed `opacity: 0` and a `clip-path` applied to an
+**ancestor** both reported as *"not recognised"* rather than *"hidden"*: they
+were empty because nothing happened to classify them, not because a guard
+refused them. Rename either one `email` and it would have been filled. Both
+were invisible to a per-element measurement — `opacity` does not inherit, so
+the field's own computed opacity is still 1, and a field inside a clipped box
+has a full-size rect of its own. The gate now asserts the reason, not just the
+result, and reverting the fix makes it fail with `missing trap_opacity,
+trap_clipped`.
+
+The visibility rule is a pure function over measurements taken once per field,
+which is what lets it be tested exhaustively without a browser. Two details
+earned their place: the opacity threshold is `< 0.05` rather than `=== 0`,
+because 0.01 is as unreadable as 0 and is what a form that knows about this
+check uses; and "off-screen" is measured against the **document**, not the
+viewport, because a field below the fold is a normal field on a long
+application and must be filled.
+
+`website` is released from the denylist only when the field is both visible
+and labelled, never one — it is a real field on Lever and Greenhouse and a
+honeypot on Workday, and that is the evidence that separates them.
 
 ## Invariant 4: the page never decides
 

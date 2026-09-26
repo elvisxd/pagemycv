@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Staff Engineer at Acme</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; }
+      .field { margin-top: 12px; }
+      .field label { display: block; font-weight: 600; }
+      input, select, textarea { width: 100%; padding: 6px; font: inherit; }
+      .off { position: absolute; left: -10000px; }
+    </style>
+  </head>
+  <body>
+    <h1>Staff Engineer</h1>
+    <form id="application" action="/applications" method="post">
+      <!-- Greenhouse's stable ids, the legacy spelling. -->
+      <div class="field">
+        <label for="first_name">First Name <span>*</span></label>
+        <input type="text" id="first_name" name="first_name" autocomplete="given-name" />
+      </div>
+      <div class="field">
+        <label for="last_name">Last Name <span>*</span></label>
+        <input type="text" id="last_name" name="last_name" autocomplete="family-name" />
+      </div>
+      <div class="field">
+        <label for="email">Email <span>*</span></label>
+        <input type="email" id="email" name="email" autocomplete="email" />
+      </div>
+      <div class="field">
+        <label for="phone">Phone</label>
+        <input type="tel" id="phone" name="phone" autocomplete="tel" />
+      </div>
+      <div class="field">
+        <label for="resume">Resume/CV</label>
+        <input type="file" id="resume" name="resume" />
+      </div>
+
+      <!-- A label that is a sibling rather than a `for`, which is what both
+           boards actually emit in places and what the obvious lookup misses. -->
+      <div class="field">
+        <label>Current company</label>
+        <input type="text" name="question_7001" />
+      </div>
+
+      <!-- No `for`, no wrapping label, no aria-label: only the group. -->
+      <div class="field">
+        <span class="label">LinkedIn Profile</span>
+        <input type="text" name="question_7002" />
+      </div>
+
+      <div class="field">
+        <label for="cover_letter">Cover Letter</label>
+        <textarea id="cover_letter" name="cover_letter" rows="4"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="location">Location (City)</label>
+        <input type="text" id="location" name="job_application[location]" />
+      </div>
+
+      <h3>U.S. Equal Employment Opportunity information</h3>
+      <div class="field">
+        <label for="gender">Gender</label>
+        <select id="gender" name="job_application[gender]">
+          <option value="">Please select</option>
+          <option value="1">Male</option>
+          <option value="2">Female</option>
+          <option value="3">Decline To Self Identify</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="hispanic">Are you Hispanic/Latino?</label>
+        <select id="hispanic" name="job_application[hispanic]">
+          <option value="">Please select</option>
+          <option value="1">Yes</option>
+          <option value="2">No</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="veteran">Veteran Status</label>
+        <select id="veteran" name="job_application[veteran]">
+          <option value="">Please select</option>
+          <option value="1">I am not a protected veteran</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="disability">Disability Status</label>
+        <select id="disability" name="job_application[disability]">
+          <option value="">Please select</option>
+          <option value="1">No, I do not have a disability</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="auth">Are you legally authorized to work in the United States?</label>
+        <select id="auth" name="question_auth">
+          <option value="">Please select</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+
+      <!-- A flat container holding TWO controls and one label. The second
+           must not inherit the first's question: that is how an email address
+           ends up in a salary box. -->
+      <div class="fields">
+        <label for="shared_email">Email</label>
+        <input type="text" id="shared_email" name="shared_email">
+        <input type="text" name="unlabelled_neighbour">
+      </div>
+
+      <!-- A disabled field that is otherwise perfectly recognisable. -->
+      <div class="field">
+        <label for="locked_email">Email</label>
+        <input type="email" id="locked_email" name="locked_email" disabled />
+      </div>
+
+      <!-- Prefilled by the board. Not ours to overwrite. -->
+      <div class="field">
+        <label for="prefilled">Phone</label>
+        <input type="tel" id="prefilled" name="prefilled_phone" value="+34 600 000 000" />
+      </div>
+
+      <div class="off"><input type="text" name="beecatcher" /></div>
+
+      <button type="submit">Submit Application</button>
+    </form>
+
+    <script>
+      window.__submits = 0;
+      document.getElementById('application').addEventListener('submit', (e) => {
+        e.preventDefault();
+        window.__submits += 1;
+      });
+    </script>
+  </body>
+</html>

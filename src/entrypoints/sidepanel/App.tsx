@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import type { ProfileView, VaultState } from '../../db/schema';
+import type { ProfileView, ResumeMeta, VaultState } from '../../db/schema';
+import type { FillReport, PlannedField } from '../../fill/types';
 import { sendVault } from '../../messaging/vault';
 import {
   Button,
@@ -9,9 +10,60 @@ import {
   Row,
   Screen,
   Section,
+  type State,
   StateChip,
+  Tally,
 } from '../../ui/components';
+import { toBase64 } from '../../util/base64';
 import { MIN_PASSPHRASE } from '../../vault/crypto';
+
+/**
+ * How a planned field reads in the review list.
+ *
+ * A refusal is never silent and never generic: the reason it carries is the
+ * reason shown, so a honeypot that was skipped and a field we simply had no
+ * value for look different at a glance. A honeypot correctly skipped has to
+ * be visible, or nobody can tell the denylist still works.
+ */
+function chipFor(field: PlannedField): { state: State; label: string } {
+  if (field.action === 'fill') return { state: 'filled', label: field.strategy };
+  if (field.action === 'attach') return { state: 'filled', label: 'attached' };
+  switch (field.reason) {
+    case 'sensitive':
+      return { state: 'sensitive', label: 'yours to answer' };
+    case 'honeypot':
+      return { state: 'review', label: 'honeypot' };
+    case 'hidden':
+      return { state: 'skipped', label: 'hidden' };
+    case 'already-filled':
+      return { state: 'skipped', label: 'already filled' };
+    case 'unrecognised':
+      return { state: 'review', label: 'not recognised' };
+    default:
+      return { state: 'skipped', label: 'skipped' };
+  }
+}
+
+/** Sensitive first, then anything needing attention, then the quiet rows. */
+const ROW_ORDER: Record<string, number> = {
+  sensitive: 0,
+  honeypot: 1,
+  unrecognised: 2,
+  fill: 3,
+  attach: 3,
+  'no-value': 4,
+  unsupported: 5,
+  'already-filled': 6,
+  hidden: 7,
+};
+
+function sortFields(fields: readonly PlannedField[]): PlannedField[] {
+  return [...fields].sort((a, b) => {
+    const ka = a.action === 'skip' ? a.reason : a.action;
+    const kb = b.action === 'skip' ? b.reason : b.action;
+    return (ROW_ORDER[ka] ?? 9) - (ROW_ORDER[kb] ?? 9);
+  });
+}
 
 function yearRange(start: string | null, end: string | null): string {
   const from = start ? start.slice(0, 4) : '';
@@ -28,7 +80,11 @@ export function App() {
   const [showImport, setShowImport] = useState(false);
   const [markdown, setMarkdown] = useState('');
   const [imported, setImported] = useState<string | null>(null);
+  const [resume, setResume] = useState<ResumeMeta | null>(null);
+  const [report, setReport] = useState<FillReport | null>(null);
+  const [filling, setFilling] = useState(false);
   const passphraseRef = useRef<HTMLInputElement>(null);
+  const resumeInputRef = useRef<HTMLInputElement>(null);
   const markdownRef = useRef<HTMLTextAreaElement>(null);
   const importButtonRef = useRef<HTMLButtonElement>(null);
   /**
@@ -59,8 +115,10 @@ export function App() {
     // and offers "Import your CV" over the CV already stored. Seeing that
     // immediately after unlocking reads as data loss.
     const view = await sendVault('vault:profile', undefined);
+    const storedResume = await sendVault('vault:resumeMeta', undefined);
     if (mine !== request.current) return;
     setProfile(view);
+    setResume(storedResume);
     setVault(state);
   }, []);
 
@@ -94,15 +152,27 @@ export function App() {
   }, [showImport]);
 
   // Keeps the auto-lock honest: the panel being open is not activity, but
-  // using it is. Polls the state so an expiry is reflected without a reload.
+  // using it is. Polls so an expiry is reflected without a reload.
+  //
+  // It reports a LOCK and nothing else, and it bumps the request counter only
+  // when it has one to report. The earlier version invalidated every refresh
+  // in flight on each tick, including the one loading the profile right after
+  // an import, and the panel then rendered an unlocked vault with no CV and
+  // offered to import over the one just stored. That is the same failure the
+  // atomic transition fixed, arriving from the other side; adding a second
+  // await to refresh() widened the window enough for the gate to catch it.
   useEffect(() => {
     const timer = setInterval(() => {
-      const mine = ++request.current;
       sendVault('vault:state', undefined)
         .then((s) => {
-          if (mine !== request.current) return;
+          if (s.status === 'unlocked') return;
+          request.current++;
           setVault(s);
-          if (s.status !== 'unlocked') setProfile(null);
+          setProfile(null);
+          // A locked vault must not leave a filled-form report on screen
+          // listing what was written from it.
+          setReport(null);
+          setResume(null);
         })
         .catch(() => {});
     }, 30_000);
@@ -132,6 +202,41 @@ export function App() {
       // Silence here would leave the panel showing an unlocked vault while the
       // user believes they locked it.
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const fill = async () => {
+    setFilling(true);
+    setError(null);
+    setReport(null);
+    try {
+      setReport(await sendVault('vault:fill', undefined));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFilling(false);
+    }
+  };
+
+  const pickResume = async (file: File) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const stored = await sendVault('vault:setResume', {
+        filename: file.name,
+        // Chrome leaves `type` empty for some uploads; the worker refuses an
+        // unrecognised type, so guessing one here would only move the error.
+        mimeType: file.type,
+        base64: toBase64(bytes),
+      });
+      setResume(stored.meta);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      // Clearing it means picking the same file twice in a row still fires.
+      if (resumeInputRef.current) resumeInputRef.current.value = '';
     }
   };
 
@@ -317,6 +422,104 @@ export function App() {
           ) : null}
         </div>
       )}
+
+      <Section title="Fill a form">
+        <div style={{ padding: 12 }}>
+          <p style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
+            Open a Lever or Greenhouse application in the active tab. PageMyCV fills what it
+            recognises, highlights every value it wrote, and never submits: the last click is always
+            yours.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Button onClick={fill} disabled={filling || busy}>
+              {filling ? 'Filling…' : 'Fill this form'}
+            </Button>
+            {report ? (
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  setReport(null);
+                  sendVault('vault:clearFill', undefined).catch(() => {});
+                }}
+              >
+                Clear highlights
+              </Button>
+            ) : null}
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label
+              htmlFor="resume-file"
+              style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}
+            >
+              Résumé file {resume ? `· ${resume.filename}` : '· none stored'}
+            </label>
+            <input
+              id="resume-file"
+              ref={resumeInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.md,.txt,application/pdf,application/msword,text/markdown,text/plain"
+              disabled={busy}
+              onChange={(e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (file) pickResume(file);
+              }}
+              style={{ marginTop: 4, font: 'inherit', fontSize: 11, maxWidth: '100%' }}
+            />
+          </div>
+
+          {report ? (
+            <div role="status" aria-live="polite" data-testid="fill-report">
+              <Tally
+                counts={[
+                  { state: 'filled', label: 'filled', n: report.filled + report.attached },
+                  {
+                    state: 'sensitive',
+                    label: 'left to you',
+                    n: report.fields.filter((f) => f.action === 'skip' && f.reason === 'sensitive')
+                      .length,
+                  },
+                  {
+                    state: 'review',
+                    label: 'honeypots refused',
+                    n: report.fields.filter((f) => f.action === 'skip' && f.reason === 'honeypot')
+                      .length,
+                  },
+                  { state: 'skipped', label: 'skipped', n: report.skipped },
+                  { state: 'error', label: 'failed', n: report.failures.length },
+                ]}
+              />
+            </div>
+          ) : null}
+        </div>
+      </Section>
+
+      {report ? (
+        <Section title={`Review · ${report.fields.length} fields`}>
+          {sortFields(report.fields).map((f) => {
+            const chip = chipFor(f);
+            return (
+              <Row
+                key={f.ref}
+                title={f.label}
+                subtitle={f.action === 'skip' ? f.detail : undefined}
+                meta={
+                  f.action === 'fill' ? f.value : f.action === 'attach' ? f.filename : undefined
+                }
+                chip={<StateChip state={chip.state} label={chip.label} />}
+              />
+            );
+          })}
+          {report.failures.map((f) => (
+            <Row
+              key={`fail-${f.ref}`}
+              title={f.label}
+              subtitle={f.detail}
+              chip={<StateChip state="error" label="failed" />}
+            />
+          ))}
+        </Section>
+      ) : null}
 
       {p?.contact ? (
         <Section title="Contact">

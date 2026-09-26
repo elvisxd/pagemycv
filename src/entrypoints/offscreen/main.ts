@@ -5,7 +5,7 @@
 // It also outlives the service worker, which is terminated after 30 seconds of
 // idle. That is why the vault key lives down here rather than up there.
 
-import type { ProfileView, VaultState } from '../../db/schema';
+import type { DbProtocol } from '../../messaging/db';
 import { onDb } from '../../messaging/db';
 
 /**
@@ -91,12 +91,33 @@ function call<T>(cmd: string, payload?: Record<string, string>): Promise<T> {
   });
 }
 
-onDb('db:state', () => call<VaultState>('state'));
-onDb('db:create', ({ data }) => call<VaultState>('create', { passphrase: data.passphrase }));
-onDb('db:unlock', ({ data }) => call<VaultState>('unlock', { passphrase: data.passphrase }));
-onDb('db:lock', () => call<VaultState>('lock'));
-onDb('db:profile', () => call<ProfileView>('profile'));
-onDb('db:importCv', ({ data }) =>
-  call<{ imported: true; counts: Record<string, number> }>('importCv', { markdown: data.markdown }),
-);
-onDb('db:touch', () => call<VaultState>('touch'));
+/**
+ * Every message key, mapped to the worker command that answers it.
+ *
+ * A `Record` over the protocol rather than a list of `onDb` calls, because
+ * the list let a message be added to the protocol, implemented in the worker,
+ * routed by the background, and silently never registered here. TypeScript
+ * could not see it: registering a handler is optional by design, so the
+ * missing one compiled cleanly and failed at runtime as "the message port
+ * closed before a response was received", which names neither the message nor
+ * the layer. The Record makes leaving one out a type error.
+ */
+const COMMANDS: Record<keyof DbProtocol, string> = {
+  'db:state': 'state',
+  'db:create': 'create',
+  'db:unlock': 'unlock',
+  'db:lock': 'lock',
+  'db:profile': 'profile',
+  'db:importCv': 'importCv',
+  'db:touch': 'touch',
+  'db:fillValues': 'fillValues',
+  'db:setResume': 'setResume',
+  'db:resumeMeta': 'resumeMeta',
+};
+
+for (const [key, cmd] of Object.entries(COMMANDS) as [keyof DbProtocol, string][]) {
+  // The payload is passed through whole. Every worker handler destructures
+  // what it needs and ignores the rest, so there is nothing per-message to
+  // get wrong here.
+  onDb(key, ({ data }) => call(cmd, data as Record<string, string> | undefined));
+}

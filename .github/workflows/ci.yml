@@ -23,15 +23,19 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Typecheck, lint, unit tests, and the invariant guard from
+      # Typecheck, lint, unit tests, the check that the generated Chromium
+      # patterns still match the vendored source, and the invariant guard from
       # docs/03-security.md, all in one command.
       - run: pnpm check
 
       - run: pnpm build
 
-      # The Phase 1 gate. It launches a real browser twice over one profile, so
-      # it is the only thing that can prove the vault survives a restart and
-      # that nothing leaves the extension origin. It runs against a fixture CV,
+      # The Phase 1 and Phase 2 gates. A real browser, launched twice over one
+      # profile, so it is the only thing that can prove the vault survives a
+      # restart, that a form is filled without a single sensitive or hidden
+      # field being written, and that nothing leaves the extension origin. The
+      # two job boards are served from disk, so the page commits at the real
+      # board URL while nothing is fetched. It runs against a fixture CV,
       # never against anyone's real one.
       - run: pnpm exec playwright install --with-deps chromium
 

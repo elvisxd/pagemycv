@@ -147,16 +147,72 @@ forbid(/setTimeout\s*\(\s*['"`]|setInterval\s*\(\s*['"`]/, 'a timer given a stri
 forbid(/\.innerHTML\s*=|insertAdjacentHTML|\bdocument\.write\b/, 'HTML built from a string');
 
 // ── Invariant 4: never write to a honeypot ──────────────────────────────────
-// Phase 1 writes to no page at all, so this is a tripwire rather than a proof:
-// the module is required to exist before any DOM write does.
+// Both layers have to exist AND be reached. The previous version checked only
+// that files with those names were present, which a refactor that stopped
+// calling them would have passed.
 const FILL_DIR = join(SRC, 'fill');
 if (existsSync(FILL_DIR)) {
-  const fill = files.filter((f) => f.path.startsWith('src/fill/'));
-  const names = fill.map((f) => f.path).join(' ');
-  if (!/honeypot/.test(names))
+  const byPath = new Map(files.map((f) => [f.path, f.text]));
+  const plan = byPath.get('src/fill/plan.ts');
+  if (!plan) {
+    fail('src/fill/', 'a fill path exists with no planner; nothing decides what is refused');
+  } else {
+    if (!/honeypotReason\s*\(/.test(plan))
+      fail('src/fill/plan.ts', 'the planner never calls the honeypot denylist');
+    if (!/visibilityProblem\s*\(/.test(plan))
+      fail('src/fill/plan.ts', 'the planner never calls the visibility gate');
+  }
+  if (!byPath.has('src/fill/honeypot.ts'))
     fail('src/fill/', 'a fill path exists with no honeypot denylist beside it');
-  if (!/visibility/.test(names))
+  if (!byPath.has('src/fill/visibility.ts'))
     fail('src/fill/', 'a fill path exists with no visibility gate beside it');
+
+  // A plan crosses two message hops before it is executed, so the element a
+  // ref points at can have been re-rendered into a different field. Writing
+  // without re-checking puts the right value in the wrong box and reports a
+  // success, which is the worst failure this code can have.
+  const writer = byPath.get('src/fill/write.ts');
+  if (!writer) {
+    fail('src/fill/', 'no writer; the guard cannot verify the write-time checks');
+  } else {
+    if (!/fingerprintOf\s*\(/.test(writer))
+      fail('src/fill/write.ts', 'writes without re-deriving the field fingerprint');
+    if (!/\.isConnected/.test(writer))
+      fail('src/fill/write.ts', 'writes without checking the element is still in the page');
+  }
+
+  // The only module allowed to write to a page is the one whose whole job is
+  // that, so a DOM write cannot quietly appear in the classifier or the
+  // planner where no honeypot check guards it.
+  for (const { path, text } of files) {
+    if (!path.startsWith('src/fill/') && path !== 'src/entrypoints/content.ts') continue;
+    if (path === 'src/fill/write.ts') continue;
+    if (/\.value\s*=[^=]|\.files\s*=[^=]|setAttribute\s*\(|\.checked\s*=[^=]/.test(text)) {
+      fail(path, 'writes to the page outside src/fill/write.ts, where the guards are');
+    }
+  }
+}
+
+// ── Invariant 2: a sensitive value never reaches the fill path ──────────────
+// Enforced by absence, not by filtering. Nothing that runs in or feeds a page
+// may name the columns a sensitive value is stored in, so there is no ordering
+// bug or forgotten filter that could let one through.
+for (const { path, text } of files) {
+  if (!path.startsWith('src/fill/') && path !== 'src/entrypoints/content.ts') continue;
+  if (/sensitive_value|value_enc/.test(text)) {
+    fail(path, 'the fill path names a sensitive storage column');
+  }
+}
+// And the values object the worker hands out must be built from a literal set
+// of keys rather than from a query, which is the shape a leak would need.
+const workerText = files.find((f) => f.path === 'src/db/worker.ts')?.text ?? '';
+if (workerText) {
+  const fn = /async function readFillValues\([\s\S]*?\n}/.exec(workerText);
+  if (!fn) {
+    fail('src/db/worker.ts', 'readFillValues could not be located; the guard cannot verify it');
+  } else if (/sensitive_value/.test(fn[0])) {
+    fail('src/db/worker.ts', 'readFillValues reads the sensitive_value table');
+  }
 }
 
 // ── Invariant 2 and the vault's own rules ───────────────────────────────────
@@ -230,8 +286,42 @@ if (!permMatch) {
     }
   }
 }
+// Still empty in Phase 2, and not as a deferral. The content script's own
+// `matches` grant it the two hosts it runs on; host_permissions would also
+// give the background the URL of every tab, which it has no use for. The
+// background reads a tab id and nothing else, and gets the URL from the
+// content script that is already there. Phase 3 revisits this with a runtime
+// request on a user gesture, which is a different thing from a static grant.
 if (/host_permissions/.test(config))
-  fail(configPath, 'host_permissions must stay empty until Phase 2');
+  fail(configPath, 'host_permissions must stay empty; the content script matches are the grant');
+
+// ── The content script's reach ──────────────────────────────────────────────
+// Declared from src/ats/registry.ts, so a host cannot be added to the
+// manifest without also being added to the registry the classifier reads.
+const registryPath = 'src/ats/registry.ts';
+const contentPath = 'src/entrypoints/content.ts';
+const contentText = files.find((f) => f.path === contentPath)?.text;
+if (contentText) {
+  if (!/matches:\s*\[\.\.\.CONTENT_MATCHES\]/.test(contentText)) {
+    fail(contentPath, 'the content script must take its matches from CONTENT_MATCHES');
+  }
+  const registryText = files.find((f) => f.path === registryPath)?.text ?? '';
+  const hosts = [...registryText.matchAll(/hosts:\s*\[([^\]]*)\]/g)].flatMap((m) =>
+    m[1]
+      .split(',')
+      .map((x) => x.trim().replace(/['"]/g, ''))
+      .filter(Boolean),
+  );
+  if (hosts.length === 0) {
+    fail(registryPath, 'no host list could be read; the guard cannot verify the reach');
+  }
+  const ALLOWED_HOSTS = ['jobs.lever.co', 'boards.greenhouse.io', 'job-boards.greenhouse.io'];
+  for (const h of hosts) {
+    if (!ALLOWED_HOSTS.includes(h)) {
+      fail(registryPath, `host "${h}" is not on the allowlist in scripts/guard.mjs`);
+    }
+  }
+}
 
 const cspMatch = /extension_pages:\s*(['"`])([\s\S]*?)\1/.exec(config);
 if (!cspMatch) {
@@ -248,16 +338,20 @@ if (!cspMatch) {
 // ── Report ──────────────────────────────────────────────────────────────────
 const ENFORCED = [
   'invariant 1, never submit a form',
+  'invariant 2, no sensitive column is named anywhere the fill path can reach',
   'invariant 3, page content never becomes an instruction',
+  'invariant 4, both honeypot layers exist and the planner calls them',
   'invariant 5, one network door',
   'the vault key never reaches persistent storage',
-  'one door each to crypto.subtle and to SQLite',
+  'one door each to crypto.subtle, to SQLite and to writing the page',
+  'the writer re-checks the element before it writes',
   'no telemetry, direct or transitive',
-  'the manifest permissions and CSP',
+  'the manifest permissions and CSP, and no host_permissions',
+  'the content script reaches only the allowlisted job boards',
 ];
 const NOT_ENFORCED = [
-  'invariant 2, sensitive fields never auto-fill — needs the Phase 2 fill path',
-  'invariant 4, honeypots — a tripwire only until src/fill exists',
+  'invariant 2 end to end — that a real form leaves them empty is gate.cjs, not this',
+  'invariant 4 end to end — that a real honeypot is refused is gate.cjs, not this',
 ];
 
 if (failures.length) {

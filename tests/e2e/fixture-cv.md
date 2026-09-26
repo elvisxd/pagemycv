@@ -5,7 +5,8 @@
 Twelve years building software that runs in production, most recently putting
 language models behind deterministic code rather than in front of it.
 
-- linkedin.com/in/ada-lovelace · github.com/adalovelace
+- linkedin.com/in/ada-lovelace · github.com/adalovelace · adalovelace.dev/work
+- ada@lovelace.test · Phone: +1 407 555 0142
 - Orlando, Florida · Open to relocation & remote work
 
 ## Experience

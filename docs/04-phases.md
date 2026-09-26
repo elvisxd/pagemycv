@@ -110,7 +110,7 @@ Two corrections to the plan, found by building it:
   messenger, only for the page messenger. The two channels are kept apart by
   key prefixes instead, which the gate confirms works.
 
-## Phase 2 — Fill Lever and Greenhouse, direct URLs only
+## Phase 2 — Fill Lever and Greenhouse, direct URLs only · done
 
 **Both, not Lever alone.** They are similar enough that the second is nearly
 free, and two data points stop the first adapter from hard-coding one ATS's
@@ -133,9 +133,104 @@ The first two passes cover identity, address and phone well. Neither covers work
 history, education, visa status or demographics, which is most of a job
 application. Do not plan around them carrying more than they do.
 
-**Gate.** A real Lever application and a real Greenhouse application, both
-filled, both reviewed, both submitted by hand. Zero sensitive fields filled
-automatically. Zero hidden fields written.
+**Gate: passed.** `node tests/e2e/gate.cjs`, now forty-five checks, run several
+times in a row without a failure. The two boards are served from disk by the
+harness through Playwright's `context.route`, so the page commits at the real
+`https://jobs.lever.co/...` and `https://boards.greenhouse.io/...` URL — which
+is what the content script's `matches` are actually tested against — while
+nothing is fetched from the network. **The extension is not modified for the
+test in any way.**
+
+| Check | Result |
+|---|---|
+| **Zero sensitive fields filled**, nine of them on one form | pass |
+| A field beside a labelled one does **not** inherit its label | pass |
+| Nothing is attached to a form with nowhere to attach it | pass |
+| **Zero hidden fields written**, across nine techniques | pass |
+| Each trap refused **by a named guard**, not merely left unrecognised | pass |
+| It never submitted, on either board | pass |
+| The fixture really contains those traps, so the two counts above are not counting nothing | pass |
+| Every field it filled holds the value the CV actually says | pass |
+| A visible, labelled `website` **is** filled, so the denylist is not blanket | pass |
+| The résumé is attached as a `File`, byte for byte | pass |
+| A label that is only a sibling still resolves | pass |
+| A label that is only a `<span>` in the field group still resolves | pass |
+| A disabled field is left alone | pass |
+| A field the board prefilled is not overwritten | pass |
+| No cover letter was written | pass |
+| The refused honeypots are visible in the review, not silent | pass |
+| Each sensitive field gets its own row saying it is yours to answer | pass |
+| No request left the extension origin | pass |
+
+Plus 226 unit tests, up from 81, including a jsdom suite for the two modules
+that ARE the DOM boundary. `src/fill/descriptor.ts` and `src/fill/write.ts`
+had been reachable only through the browser gate, which made them the least
+tested and most dangerous code in the phase. The adversarial review found real
+bugs in both.
+
+### The review, after the phase passed its gate
+
+Seven findings, five of them proven by reverting the fix and watching a test
+go red.
+
+| Finding | Why it mattered |
+|---|---|
+| **A held element reference can become a different field.** A plan crosses two message hops, and frameworks reuse DOM nodes while changing their attributes. | The right value written into the wrong box, reported as a success. Every write action now carries a fingerprint the writer re-derives from the live element before touching it. |
+| **The sibling-label walk stepped over another control.** | The second input in a flat container inherited the first one's question. Reverting the fix makes the gate report `unlabelled_neighbour -> "ada@lovelace.test"`. |
+| **`closest(…, 'div')` matched almost anything.** | The same bug from the other side: the first label-ish descendant of a container holding several fields. The group now has to hold exactly one control. |
+| **The CV bytes were sent on every fill.** | Most application forms have no file input. The whole résumé was crossing into a page's process with nowhere to go, which is the opposite of why the plan is built in the background. |
+| **A detached node counted as filled.** | A write nobody can see, reported as a success. |
+| **A two-character prefix counted as an option match.** | `US` is a prefix of `Usually`. Exact matches still handle a two-letter code. |
+| **`catch(() => UNSUPPORTED)` swallowed real errors.** | A bug inside the content script was reported as "this site is not supported", which is the kind of lie that costs an afternoon. |
+
+Two smaller ones: the document size was being re-measured once per field, and
+`clearHighlights` restored `outline` but not `outlineOffset`, leaving a page's
+own styling half-restored.
+
+One comment was overclaiming and is now narrower. Not marking up the page does
+**not** mean the page cannot tell it is being filled: the highlight is an
+inline style it can read, and a page watching `input` events sees every write.
+What it buys is that the scan itself, including the fields that are then
+refused, is not announced.
+
+**No `host_permissions`, and not as a deferral.** The content script's own
+`matches` are the whole grant. The background reads a tab id and nothing else,
+and learns the URL from the content script that is already running there, so
+the extension cannot see the address of any tab it is not injected into. That
+is a stronger property than a promise not to look, and `scripts/guard.mjs`
+fails the build if `host_permissions` ever appears.
+
+Six things the building changed:
+
+- **The CV parser never read an email or a phone number.** The vault held
+  neither, so a filled Lever form had five fields written and the one box
+  every board makes required still empty. Found by the gate, not by review.
+- **A message could be added everywhere except the one place that routes it.**
+  Registering a handler is optional by design, so the missing registration
+  compiled cleanly and failed at runtime as *"the message port closed before a
+  response was received"*, which names neither the message nor the layer. Both
+  hops now route through a `Record` over the protocol type, so leaving one out
+  is a type error. Proven by deleting a key and watching `tsc` fail.
+- **Text normalisation was duplicated and each copy was broken differently.**
+  One lowercased before splitting camelCase, so `name="dateOfBirth"` never
+  reached the date-of-birth pattern and an unlabelled birth date would have
+  been filled. The other kept accents, so `Résumé` did not match `résumé`,
+  because `\b` needs a word character and `é` is not one. One function now.
+- **The pass order in `09-ats.md` was wrong.** It put Chromium's patterns
+  ahead of the per-ATS map, which would have let a 0.8 guess pre-empt a 0.9
+  fact. Reversed, and the reasoning is in `src/fill/detect.ts`.
+- **Two hidden-field techniques were passing for the wrong reason.** The gate
+  said zero writes and it was true, but the review list showed `opacity: 0`
+  and a `clip-path` on an **ancestor** reported as "not recognised" rather
+  than "hidden": they were empty because nothing classified them, not because
+  a guard refused them. `opacity` does not inherit and a field inside a
+  clipped box has a full-size rect, so neither is visible to a per-element
+  measurement. Found by looking at a screenshot, not by a failing assertion.
+  The gate now asserts which guard refused each trap.
+- **Two of Chromium's own IGNORED patterns cannot be used as written.**
+  `REGION_IGNORED` is literally `province|region|other`, so promoting it to a
+  global veto would have vetoed the `STATE` field it exists to disambiguate.
+  The vetoes are scoped, and `patterns.test.ts` pins that.
 
 ---
 

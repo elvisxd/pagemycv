@@ -65,6 +65,19 @@ const GLYPH: Record<State, string> = {
   error: '×',
 };
 
+/** A count with its own label, for the one-line summary above a review list. */
+export function Tally({ counts }: { counts: { state: State; label: string; n: number }[] }) {
+  const shown = counts.filter((c) => c.n > 0);
+  if (shown.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 0' }}>
+      {shown.map((c) => (
+        <StateChip key={c.label} state={c.state} label={`${c.n} ${c.label}`} />
+      ))}
+    </div>
+  );
+}
+
 /** State is never colour alone: a glyph and a label carry it too. */
 export function StateChip({ state, label }: { state: State; label: string }) {
   return (

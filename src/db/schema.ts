@@ -56,6 +56,12 @@ export interface SensitiveFieldMeta {
   hasValue: boolean;
 }
 
+/** The stored resume, without its bytes. */
+export interface ResumeMeta {
+  filename: string;
+  mimeType: string;
+}
+
 /** What the side panel is allowed to see. Sensitive values are never included. */
 export interface ProfileView {
   profile: {
