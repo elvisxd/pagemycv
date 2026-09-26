@@ -15,6 +15,10 @@ export default defineConfig({
     // needs 'unlimitedStorage' for quota and nothing else. No host permissions
     // exist yet because no code in this phase can reach a page or the network.
     permissions: ['offscreen', 'unlimitedStorage', 'sidePanel'],
+    // chrome.offscreen needs 109, chrome.sidePanel 114, and hasDocument() 116,
+    // which background.ts calls unguarded. Below that the first message throws
+    // and the panel shows a failure it cannot explain.
+    minimum_chrome_version: '116',
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
     },

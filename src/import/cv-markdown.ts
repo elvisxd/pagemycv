@@ -86,8 +86,11 @@ export function parseDate(raw: string): string | null {
 
 /** Splits "2022 — Present" or "2012–2017" into a start and an end. */
 export function parseRange(raw: string): { startedOn: string | null; endedOn: string | null } {
+  // A bare hyphen counts here. "2012-2017" is what most people type, and this
+  // input is already known to be a date range, so splitting on it cannot break
+  // a hyphenated word the way it would in a job title.
   const parts = raw
-    .split(/\s*[—–]\s*|\s+-\s+/)
+    .split(/\s*[—–]\s*|\s+-\s+|(?<=\d)\s*-\s*(?=[A-Za-z0-9])/)
     .map((p) => p.trim())
     .filter(Boolean);
   if (parts.length === 0) return { startedOn: null, endedOn: null };
@@ -121,7 +124,11 @@ export function parseCvMarkdown(markdown: string): ParsedCv {
   const titleLine = lines.find((l) => /^#\s+/.test(l)) ?? '';
   const { first, last } = splitName(titleLine.replace(/^#\s+/, ''));
 
-  const headLines = lines.slice(lines.indexOf(titleLine) + 1, 20);
+  // Relative to the heading. An absolute end meant that a CV whose "# Name"
+  // sat past line 20, behind front matter or a table of contents, produced an
+  // empty window and silently lost its headline and summary.
+  const titleAt = lines.indexOf(titleLine);
+  const headLines = lines.slice(titleAt + 1, titleAt + 21);
   const headlineLine = headLines.find((l) => /^\*\*.+\*\*\s*$/.test(l.trim()));
   const headline = headlineLine ? headlineLine.trim().replace(/^\*\*|\*\*$/g, '') : null;
 
@@ -137,9 +144,14 @@ export function parseCvMarkdown(markdown: string): ParsedCv {
   // Links, from the bullet list under the headline.
   const links: ParsedLink[] = [];
   const seen = new Set<string>();
-  for (const line of lines.slice(0, 25)) {
-    for (const m of line.matchAll(/(?:https?:\/\/)?((?:[\w-]+\.)+[\w-]+\/[\w\-./]*)/g)) {
-      const url = `https://${(m[1] ?? '').replace(/^https?:\/\//, '')}`.replace(/[.,]$/, '');
+  for (const line of lines.slice(titleAt, titleAt + 26)) {
+    // A recognisable top-level domain, or an explicit scheme. The old pattern
+    // matched any word.word/word, so prose like "shipped v2.1/beta" or
+    // "Node.js/22 runtime" was stored as a link and rendered as one.
+    const URL_RE =
+      /(?:https?:\/\/[\w-]+(?:\.[\w-]+)+|(?:[\w-]+\.)+(?:com|org|net|io|dev|app|me|co|ai|sh|gg|xyz|es|ar|ve|uk|de))\/[\w\-./]*/gi;
+    for (const m of line.matchAll(URL_RE)) {
+      const url = `https://${(m[0] ?? '').replace(/^https?:\/\//, '')}`.replace(/[.,]$/, '');
       if (/\.(md|png|jpg|html)$/i.test(url) || seen.has(url)) continue;
       seen.add(url);
       links.push({ kind: linkKind(url), url });
@@ -149,7 +161,12 @@ export function parseCvMarkdown(markdown: string): ParsedCv {
   // Location, from the line that names relocation or remote.
   let city: string | null = null;
   let region: string | null = null;
-  const locLine = lines.slice(0, 25).find((l) => /relocation|remote/i.test(l) && /,/.test(l));
+  // Only a bullet. A headline such as "**Senior Engineer, Remote**" matches the
+  // same words and used to be stored as the city, so "*Senior Engineer" ended
+  // up encrypted into contact.city_enc.
+  const locLine = lines
+    .slice(titleAt, titleAt + 26)
+    .find((l) => /^[-*]\s+/.test(l) && /relocation|remote/i.test(l) && /,/.test(l));
   if (locLine) {
     const head = locLine.replace(/^[-*]\s*/, '').split('·')[0] ?? '';
     const bits = head.split(',').map((b) => b.trim());
@@ -164,7 +181,16 @@ export function parseCvMarkdown(markdown: string): ParsedCv {
     const line = expLines[i] ?? '';
     if (!/^###\s+/.test(line)) continue;
     const heading = line.replace(/^###\s+/, '').trim();
-    const [title = heading, employer = ''] = heading.split(DASH);
+    // The employer is the last segment. "Senior Engineer — Payments — Stripe"
+    // used to destructure the first two and drop Stripe entirely, which is an
+    // ordinary CV heading shape. Everything before the last dash is the title,
+    // so a team or a specialisation is kept rather than discarded.
+    const segments = heading
+      .split(DASH)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const employer = segments.length > 1 ? (segments.pop() as string) : '';
+    const title = segments.join(' — ') || heading;
     const meta = (expLines[i + 1] ?? '').trim();
     let startedOn: string | null = null;
     let endedOn: string | null = null;

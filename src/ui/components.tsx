@@ -1,4 +1,4 @@
-import type { ComponentChildren } from 'preact';
+import type { ComponentChildren, Ref } from 'preact';
 
 export function Screen({ children }: { children: ComponentChildren }) {
   return <div style={{ padding: '16px', maxWidth: 420, margin: '0 auto' }}>{children}</div>;
@@ -22,16 +22,19 @@ export function Button({
   disabled,
   variant = 'primary',
   type = 'button',
+  buttonRef,
 }: {
   children: ComponentChildren;
   onClick?: () => void;
   disabled?: boolean;
   variant?: 'primary' | 'quiet';
   type?: 'button' | 'submit';
+  buttonRef?: Ref<HTMLButtonElement>;
 }) {
   const primary = variant === 'primary';
   return (
     <button
+      ref={buttonRef}
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -79,7 +82,9 @@ export function StateChip({ state, label }: { state: State; label: string }) {
         whiteSpace: 'nowrap',
       }}
     >
-      <span aria-hidden="true">{GLYPH[state]}</span>
+      <span aria-hidden="true" style={{ color: `var(--${state}-glyph)` }}>
+        {GLYPH[state]}
+      </span>
       {label}
     </span>
   );

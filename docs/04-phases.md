@@ -98,7 +98,7 @@ a failure.
 | The profile survived the restart | pass |
 | **No request left the extension origin** | pass |
 
-Plus 32 unit tests, including the one the AAD design exists for: a ciphertext
+Plus 81 unit tests, including the one the AAD design exists for: a ciphertext
 moved to another row or column fails to decrypt.
 
 Two corrections to the plan, found by building it:
