@@ -13,10 +13,27 @@ import { CONTENT_MATCHES } from '../ats/registry';
 import type { Control } from '../fill/descriptor';
 import { describeForm } from '../fill/descriptor';
 import { applyPlan, clearHighlights } from '../fill/write';
-import { onFill } from '../messaging/fill';
+import { onFill, sendFill } from '../messaging/fill';
 
 export default defineContentScript({
   matches: [...CONTENT_MATCHES],
+  /**
+   * The whole of Phase 3, as it turned out.
+   *
+   * A company careers page embeds the board in a cross-origin iframe. Chrome
+   * injects this script into that iframe because ITS origin is on the match
+   * list, and it does so without any permission over the page that embeds it:
+   * spikes/phase-3 confirms the parent is never injected and the background
+   * cannot reach it. The plan expected to need a broad host permission
+   * requested at runtime; it does not need one at all.
+   *
+   * `matchAboutBlank` covers an about:blank or srcdoc frame, which inherits
+   * its PARENT's origin. That is a security question rather than a feature,
+   * and the spike answers it: such a frame under an origin we do not match is
+   * not injected, so this cannot become a way into the company's own page.
+   */
+  allFrames: true,
+  matchAboutBlank: true,
   // The boards render their form with client-side script, so waiting for the
   // parse to finish is not enough on the newer Greenhouse board.
   runAt: 'document_idle',
@@ -37,6 +54,20 @@ export default defineContentScript({
      * otherwise interleave a describe between the other's describe and apply.
      */
     let generation = 0;
+
+    /** What this frame is, for the background's roll call. */
+    const self = () => ({
+      url: location.href,
+      fields: document.querySelectorAll('input, select, textarea').length,
+    });
+
+    // Sent TO the background, so it arrives carrying this frame's id. A reply
+    // to a broadcast cannot do that: the broadcast resolves with whichever
+    // frame answers first and the rest are lost.
+    onFill('fill:rollCall', () => {
+      sendFill('fill:here', self()).catch(() => {});
+      return { ack: true } as const;
+    });
 
     onFill('fill:describe', () => {
       const survey = describeForm(document);

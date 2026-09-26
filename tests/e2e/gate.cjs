@@ -54,7 +54,14 @@ const EXPECT = {
 // context.route, so the URL a content script matches on is genuinely
 // https://jobs.lever.co/... while nothing is fetched from the network. The
 // extension is not modified for the test in any way.
-const FIXTURE_ORIGINS = ['https://jobs.lever.co', 'https://boards.greenhouse.io'];
+// careers.acme.test is the company's own domain. It is deliberately NOT in
+// the extension's match list: the gate serves it so the embedded case can be
+// tested, and the extension must never be injected into it.
+const FIXTURE_ORIGINS = [
+  'https://jobs.lever.co',
+  'https://boards.greenhouse.io',
+  'https://careers.acme.test',
+];
 
 const BOARDS = {
   lever: {
@@ -70,6 +77,16 @@ const BOARDS = {
   nofile: {
     url: 'https://jobs.lever.co/acme/no-file-here/apply',
     file: path.join(__dirname, '../fixtures/lever-nofile.html'),
+  },
+  // Phase 3: the case that is actually most applications. A company careers
+  // page embedding the board's form in a cross-origin iframe.
+  careers: {
+    url: 'https://careers.acme.test/jobs/4102938/?application=true',
+    file: path.join(__dirname, '../fixtures/careers-embed.html'),
+  },
+  embed: {
+    url: 'https://boards.greenhouse.io/embed/job_app?for=acme&token=4102938',
+    file: path.join(__dirname, '../fixtures/greenhouse.html'),
   },
 };
 
@@ -357,28 +374,67 @@ async function main() {
     await job.bringToFront();
 
     await page.getByRole('button', { name: 'Fill this form' }).click();
-    await page.getByTestId('fill-report').waitFor({ timeout: 60000 });
-
-    const state = await job.evaluate(() => {
-      const out = {};
-      for (const el of document.querySelectorAll('input, select, textarea')) {
-        const key = el.getAttribute('name') || el.id;
-        if (!key) continue;
-        out[key] = el.type === 'file' ? (el.files?.[0]?.name ?? '') : el.value;
-      }
+    // Whichever lands first. Waiting only for the report turns "the panel
+    // refused and said why" into a sixty-second timeout and a crash, which
+    // hides the reason behind a stack trace: reverting `all_frames` used to
+    // fail exactly that way.
+    const outcome = await Promise.race([
+      page
+        .getByTestId('fill-report')
+        .waitFor({ timeout: 60000 })
+        .then(() => ({ filled: true, error: null })),
+      page
+        .getByRole('alert')
+        .waitFor({ timeout: 60000 })
+        .then(async () => ({ filled: false, error: await page.getByRole('alert').innerText() })),
+    ]).catch((e) => ({ filled: false, error: `nothing happened within 60s: ${e.message}` }));
+    if (!outcome.filled) {
       return {
-        values: out,
-        submits: window.__submits,
-        fileSize: document.querySelector('input[type=file]')?.files?.[0]?.size ?? 0,
+        job,
+        failed: outcome.error,
+        state: { values: {}, submits: 0, fileSize: 0 },
+        report: '',
+        review: '',
+        parentState: {},
+        parentSubmits: 0,
+        frameNote: null,
       };
-    });
+    }
+
+    // Read the frame that actually holds the application form. On a careers
+    // page that is the embedded one; the parent is read separately, because
+    // proving it was NOT touched is half of what this phase is for.
+    const readForm = (frame) =>
+      frame.evaluate(() => {
+        const out = {};
+        for (const el of document.querySelectorAll('input, select, textarea')) {
+          const key = el.getAttribute('name') || el.id;
+          if (!key) continue;
+          out[key] = el.type === 'file' ? (el.files?.[0]?.name ?? '') : el.value;
+        }
+        return {
+          values: out,
+          submits: window.__submits ?? 0,
+          fileSize: document.querySelector('input[type=file]')?.files?.[0]?.size ?? 0,
+        };
+      });
+
+    const embedded = job.frames().find((f) => f !== job.mainFrame());
+    const state = await readForm(embedded ?? job.mainFrame());
+    const parentRead = embedded ? await readForm(job.mainFrame()) : { values: {}, submits: 0 };
+    const parentState = parentRead.values;
+    const parentSubmits = parentRead.submits;
+    const frameNote = await page
+      .getByTestId('frame-note')
+      .innerText()
+      .catch(() => null);
     const report = await page.getByTestId('fill-report').innerText();
     // The whole review list, so a check can assert WHY a field was refused
     // rather than only that it ended up empty. A trap that nothing happened
     // to recognise is empty for the wrong reason: rename it `email` and it
     // would be filled.
     const review = await page.locator('body').innerText();
-    return { job, state, report, review };
+    return { job, state, report, review, parentState, parentSubmits, frameNote };
   }
 
   // ── Lever ───────────────────────────────────────────────────────────
@@ -581,6 +637,76 @@ async function main() {
     nofile.report.replace(/\n/g, ' '),
   );
   await nofile.job.close();
+
+  // ── Phase 3: a board form embedded on a company careers page ────────
+  //
+  // The gate from docs/04-phases.md: fill a Greenhouse form embedded on a
+  // third-party careers domain WITHOUT granting a permanent broad permission.
+  // The manifest is asserted below to still request none at all.
+  const careers = await fillBoard('careers');
+  const cv = careers.state.values;
+  const parent = careers.parentState;
+
+  check(
+    'careers page: the panel reached the embedded form at all',
+    !careers.failed,
+    careers.failed ?? 'reached',
+  );
+  check(
+    'careers page: the embedded board form is filled',
+    cv.first_name === EXPECT.first && cv.email === EXPECT.email,
+    JSON.stringify({ first: cv.first_name, email: cv.email }),
+  );
+  check(
+    'careers page: it says WHERE it filled, because the click was on another page',
+    /embedded on this page/i.test(careers.frameNote ?? ''),
+    careers.frameNote ?? '(no note)',
+  );
+  // The boundary. The parent origin is not on the match list, so the
+  // extension is never injected into it and the background cannot reach it.
+  check(
+    "careers page: the PARENT page's own fields were never touched",
+    (parent.newsletter_email ?? '') === '' && (parent.name ?? '') === '',
+    JSON.stringify(parent),
+  );
+  check(
+    'careers page: the parent form really has fields, so the check above counts something',
+    'newsletter_email' in parent && 'name' in parent,
+    Object.keys(parent).join(', '),
+  );
+  check(
+    'careers page: ZERO sensitive fields were filled in the embedded form',
+    ghSensitive.every((k) => (cv[k] ?? '') === ''),
+    ghSensitive.filter((k) => (cv[k] ?? '') !== '').join(', ') || 'all empty',
+  );
+  check(
+    'careers page: neither the embed nor the parent submitted',
+    careers.state.submits === 0 && careers.parentSubmits === 0,
+    `embed ${careers.state.submits}, parent ${careers.parentSubmits}`,
+  );
+  await careers.job.close();
+
+  // The gate's own wording: without a permanent broad permission. It asks for
+  // none, which is stronger than asking for one at runtime.
+  const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
+  check(
+    'the manifest still requests NO host permissions, embedded case included',
+    manifest.host_permissions === undefined &&
+      !(manifest.permissions ?? []).includes('webNavigation') &&
+      !(manifest.permissions ?? []).includes('tabs'),
+    JSON.stringify({ permissions: manifest.permissions, hosts: manifest.host_permissions ?? null }),
+  );
+  check(
+    'the content script is declared for the two boards only, in all frames',
+    (manifest.content_scripts ?? []).every(
+      (c) =>
+        c.all_frames === true &&
+        (c.matches ?? []).every((m) =>
+          /^https:\/\/(jobs\.lever\.co|(job-)?boards\.greenhouse\.io)\/\*$/.test(m),
+        ),
+    ),
+    JSON.stringify((manifest.content_scripts ?? []).map((c) => c.matches)),
+  );
 
   await ctx.close();
 

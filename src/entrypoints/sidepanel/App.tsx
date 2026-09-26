@@ -468,6 +468,15 @@ export function App() {
             />
           </div>
 
+          {report?.frameNote ? (
+            <p
+              data-testid="frame-note"
+              style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-muted)' }}
+            >
+              {report.frameNote}
+            </p>
+          ) : null}
+
           {report ? (
             <div role="status" aria-live="polite" data-testid="fill-report">
               <Tally

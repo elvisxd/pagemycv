@@ -10,11 +10,11 @@ PageMyCV is the browser half of [Byte](https://github.com/elvisxd/byte). Byte fi
 the job, scores it against your profile and writes the text. PageMyCV is the hand
 that types it into the form and then stops.
 
-**Status: Phase 2 done.** It fills Lever and Greenhouse applications from an
-encrypted local vault, attaches your résumé, highlights everything it wrote,
-and refuses to touch a sensitive field or a honeypot. It still has no network
-code at all. Next is Phase 3: the same forms embedded in an iframe on a
-company's own careers page, which is where most applications actually live.
+**Status: Phase 3 done.** It fills Lever and Greenhouse applications from an
+encrypted local vault — on the board itself, or embedded in a company's own
+careers page, which is where most applications actually live. It attaches your
+résumé, highlights everything it wrote, and refuses to touch a sensitive field
+or a honeypot. It still has no network code at all.
 
 | | |
 |---|---|
@@ -22,7 +22,7 @@ company's own careers page, which is where most applications actually live.
 | Hidden fields written, across nine techniques | **zero** |
 | Forms submitted | **zero**, and there is no code that could |
 | Requests leaving your machine | **zero** |
-| Host permissions requested | **none** |
+| Host permissions requested | **none**, embedded forms included |
 
 <img src="docs/media/filled-form.png" alt="A Lever application form with seven fields filled and outlined in blue, the resume attached, and the Gender select still untouched" width="620">
 
@@ -104,6 +104,14 @@ The extension runs on `jobs.lever.co`, `boards.greenhouse.io` and
 the content script's own match list is the entire grant, so the extension
 cannot read the address of a tab it is not running in.
 
+**That holds for an embedded form too.** When a company's careers page puts the
+board's application form in an iframe, the extension fills it — because the
+*iframe's* origin is on the list. The page around it is never injected and the
+extension cannot reach it, which
+[`spikes/phase-3/`](spikes/phase-3/) confirms in a real browser rather than
+asserting. No permission over the company's domain is requested, at runtime or
+otherwise.
+
 Ashby moved out of the first batch. It renders inside its own iframe, which
 makes it the same problem as an embedded Greenhouse form on a company's
 careers page — Phase 3, not Phase 2.
@@ -141,7 +149,7 @@ The risk lands on your account, not on this project. See
 ```bash
 pnpm install
 pnpm build            # then load .output/chrome-mv3 as an unpacked extension
-pnpm check            # typecheck, lint, 226 unit tests, and the invariant guard
+pnpm check            # typecheck, lint, 237 unit tests, and the invariant guard
 node tests/e2e/gate.cjs   # the Phase 1 and 2 gates, against a real browser
 ```
 

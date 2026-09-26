@@ -77,9 +77,14 @@ lives.
   | Embedded form | `https://boards.greenhouse.io/embed/job_app?for=acme&token=2272778` |
 
   The iframe is cross-origin, so the parent content script cannot reach it. A
-  second content script instance in the child frame is required. When that
-  fails, offer to open the embedded URL directly in a new tab, which is what
-  another extension concluded after fighting it.
+  second content script instance in the child frame is required.
+
+  **That is all it takes, and it needs no permission over the parent.** With
+  `all_frames: true`, Chrome injects into the iframe because the *iframe's*
+  origin is on the match list; the page embedding it is irrelevant to the
+  decision and is never injected. Proven in `spikes/phase-3/`. The
+  open-the-standalone-URL fallback another extension settled for is not needed
+  here, because there is no parent content script that has to reach anything.
 
 ## Ashby
 
@@ -210,7 +215,7 @@ thirty come from label heuristics, the per-ATS maps above, and finally from you.
 | Lever | 2 · built | No — against a fixture built from public page source |
 | Greenhouse | 2 · built | No — against a fixture built from public page source |
 | Ashby | Unplanned | No |
-| Greenhouse embedded | 3 | No |
+| Greenhouse embedded | 3 · built | No — against a fixture built from the documented embed shape |
 | Workday | 4 | No |
 | iCIMS, Taleo, SmartRecruiters | Unplanned | No |
 

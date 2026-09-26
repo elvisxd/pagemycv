@@ -234,21 +234,66 @@ Six things the building changed:
 
 ---
 
-## Phase 3 — Iframes and company career pages
+## Phase 3 — Iframes and company career pages · done
 
-The case that is actually most of your applications: the same Greenhouse or
-Ashby form embedded in an iframe on the company's own careers domain.
+The case that is actually most of your applications: the same Greenhouse form
+embedded in an iframe on the company's own careers domain.
 
-- `all_frames: true` plus `match_about_blank`
-- Per-frame injection driven by `chrome.webNavigation`, because the declarative
-  flag only covers frames present at load and these embeds are script-injected
-  after the Apply button
-- Cross-frame messaging through the service worker
-- The broad host permission requested at runtime, on a user gesture
-- Fallback: offer to open the standalone ATS URL in a new tab
+**Three of the five bullets planned here were wrong**, and a spike said so
+before any of them was built. The harness is at
+[`spikes/phase-3/`](../spikes/phase-3/).
 
-**Gate.** Fill a Greenhouse form embedded on a third-party careers domain
-without granting a permanent broad permission.
+| Planned | Actually |
+|---|---|
+| `all_frames: true` plus `match_about_blank` | **Correct**, and the whole of it |
+| Per-frame injection driven by `chrome.webNavigation`, because the declarative flag only covers frames present at load | **Wrong.** A frame added two seconds after load is injected like any other. Chrome matches a frame when it navigates, not only at document start. The permission would have bought nothing and cost the URL of every frame of every tab. |
+| Cross-frame messaging through the service worker | **Correct**, and it needed one idea: see below |
+| The broad host permission requested at runtime, on a user gesture | **Wrong.** None is needed, at runtime or otherwise. |
+| Fallback: offer to open the standalone ATS URL in a new tab | **Not needed.** It was for the case where a parent content script cannot reach the child. There is no parent content script, and the child needs no reaching. |
+
+**Why no permission is needed.** The iframe's own origin is on the match list,
+and that is the entire basis for Chrome injecting into it. The page that
+embeds it is irrelevant to the decision. The spike confirms the parent is
+never injected and the background cannot reach it at all — the message fails
+with *"Could not establish connection"*.
+
+**The one thing that did need designing** is knowing *which* frame to talk to.
+`chrome.tabs.sendMessage(tabId, msg)` with no `frameId` reaches every frame but
+resolves with whichever answers first, so a broadcast cannot enumerate. The
+answer is to invert it:
+
+```
+background ──"roll call"──▶ every frame        (reply discarded)
+background ◀──"here I am"── each frame          (carries sender.frameId)
+background ──describe/apply──▶ the chosen frame (addressed by id)
+```
+
+A message travelling *towards* the background carries `sender.frameId`, and
+that is the only way to learn a frame's id without `webNavigation`.
+
+`src/fill/frames.ts` then picks between them: most fields wins, ties broken by
+the top frame and then the lowest id, so the same page answers the same way
+twice. A fill that lands somewhere different on the second run is worse than
+one that refuses.
+
+**Gate: passed.** Fill a Greenhouse form embedded on a third-party careers
+domain without granting a permanent broad permission — satisfied by never
+asking for one.
+
+| Check | Result |
+|---|---|
+| The embedded board form is filled | pass |
+| The panel says **where** it filled, because the click was on another page | pass |
+| **The parent page's own fields were never touched** | pass |
+| The parent form really has fields, so the check above counts something | pass |
+| Zero sensitive fields filled in the embedded form | pass |
+| Neither the embed nor the parent submitted | pass |
+| The manifest still requests **no** host permissions, no `webNavigation`, no `tabs` | pass |
+| The content script is declared for the two boards only, in all frames | pass |
+| The panel reached the embedded form at all | pass |
+
+Ashby stays out. It is the same shape — its embed is its own iframe — so
+adding it is a registry entry plus a probe, not a design change.
 
 ---
 

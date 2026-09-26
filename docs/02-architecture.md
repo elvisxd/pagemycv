@@ -194,3 +194,41 @@ that decides the architecture, verbatim from Chrome's migration guide, forbids
 The test a reviewer applies is whether the full functionality is discernible
 from the submitted package. If the model's response can change what the
 extension does rather than what it types, the answer is no.
+
+## Reaching a form inside somebody else's page
+
+Most applications are not filled on the board's own domain. They are filled on
+a company careers page that embeds the board's form in a cross-origin iframe.
+
+```
+  careers.acme.com                     ← never injected, never reachable
+  └── <iframe src="boards.greenhouse.io/embed/…">
+        └── content script             ← injected, because THIS origin matches
+```
+
+Chrome decides to inject by looking at the frame's own origin, so
+`all_frames: true` is the entire mechanism. No permission over the company's
+domain is needed, at runtime or otherwise, and
+[`spikes/phase-3/`](../spikes/phase-3/) demonstrates both halves in a real
+browser: the parent is not injected, and a message addressed to it fails with
+*"Could not establish connection"*.
+
+Knowing *which* frame to talk to is the part that needed designing.
+`chrome.tabs.sendMessage(tabId, msg)` with no `frameId` reaches every frame but
+resolves with whichever answers first, so a broadcast cannot enumerate. The
+roll call inverts it:
+
+| | |
+|---|---|
+| `fill:rollCall` | background → every frame. The reply is discarded. |
+| `fill:here` | each frame → background. **Carries `sender.frameId`.** |
+| `fill:describe` / `fill:apply` | background → the chosen frame, addressed by id |
+
+A message travelling towards the background is the only way to learn a frame's
+id without `chrome.webNavigation`, which would hand us the URL of every frame
+of every tab for no gain.
+
+The roster lives in a module variable in the service worker, which is
+terminated after 30 seconds of idle. That is correct rather than unfortunate: a
+frame list older than the page it describes is worse than no list, and the roll
+call that rebuilds it costs a quarter of a second.

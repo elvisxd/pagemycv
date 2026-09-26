@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Careers at Acme — Staff Engineer</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; }
+      iframe { width: 100%; height: 700px; border: 1px solid #ddd; }
+    </style>
+  </head>
+  <body>
+    <h1>Staff Engineer</h1>
+    <p>Acme's own careers page. The extension has no permission over this origin
+       and is never injected into it.</p>
+
+    <!-- A form on the PARENT page. The extension must not be able to see it,
+         let alone write to it: this origin is not on the match list and the
+         background cannot reach frame 0 at all. -->
+    <form id="parent-form">
+      <label for="newsletter">Subscribe to our careers newsletter</label>
+      <input id="newsletter" name="newsletter_email" type="email" />
+      <label for="parent_name">Your name</label>
+      <input id="parent_name" name="name" type="text" />
+    </form>
+
+    <!-- The embed Greenhouse actually documents: a container id and a
+         cross-origin iframe pointing at the board. -->
+    <div id="grnhse_app">
+      <iframe
+        id="grnhse_iframe"
+        title="Application form"
+        src="https://boards.greenhouse.io/embed/job_app?for=acme&token=4102938"
+      ></iframe>
+    </div>
+
+    <script>
+      // The parent page counts its own submits too, so the gate can prove the
+      // extension never reached across the boundary.
+      window.__submits = 0;
+      document.getElementById('parent-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        window.__submits += 1;
+      });
+    </script>
+  </body>
+</html>

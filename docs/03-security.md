@@ -91,6 +91,16 @@ pending confirmation. **Built and passing:** nine sensitive fields on the Lever
 fixture and five on the Greenhouse one, all still empty after a full fill, each
 with its own row in the review list.
 
+**And the reach is the same for an embedded form.** When a company careers page
+puts the board's application form in an iframe, the extension fills it because
+the *iframe's* origin is on the content script's match list. The page around it
+is never injected, and the background cannot reach it: the message fails with
+*"Could not establish connection"*. No permission over the company's domain is
+requested at runtime or otherwise, and `spikes/phase-3/` demonstrates all of
+it in a real browser. `match_about_blank` does not widen this — an about:blank
+or srcdoc frame inherits its parent's origin, and one under an origin we do
+not match is not injected.
+
 **And re-checked at the moment of writing.** A plan crosses two message hops
 before it is executed, and a framework can reuse a DOM node while changing its
 attributes, so an element reference can still be live and no longer be the
