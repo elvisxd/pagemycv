@@ -63,6 +63,22 @@ Phase 0, on Chromium 141, 26 September 2026. Harness at
 | Loopback fetch from the extension | **Works on 141.** Re-check on 142, where Local Network Access is enforced. |
 | The AAD mitigation | **Proved.** Decrypts in place, fails when moved. |
 
+## Decided while building Phase 2
+
+Each of these reversed or replaced something written above, and each was
+forced by evidence rather than by taste.
+
+| Decision | Chose | Because |
+|---|---|---|
+| **Detection pass order** | **The per-ATS map BEFORE Chromium's patterns**, and a sensitive pass before both | An exact match on a field name a board documents to its integrators is stronger than a regex over label text, and the confidence scores already said so: 0.9 against 0.8. The sensitive pass has to be first because *"Country of citizenship"* matches Chromium's `COUNTRY` exactly. |
+| **Host permissions** | **None at all**, not even the two boards | The content script's `matches` already grant the two hosts. `host_permissions` would additionally hand the background the URL of every tab, for no gain: the content script already knows what page it is on and says so. The extension now cannot see the address of a tab it is not injected into. |
+| **Where the plan is built** | **In the background, not the content script** | One extra round trip buys data minimisation: only the values the plan will actually write cross into the tab's process. The alternative puts the whole profile in a page's isolated world. |
+| **Chromium's IGNORED patterns** | **Scoped, and two dropped entirely** | `REGION_IGNORED` is `province\|region\|other`; as a global veto it rejects the `STATE` field it exists to disambiguate. `CREDIT_CARD_EXP_YEAR`'s bare `exp` swallows "experience". Chromium applies these as competing classifications inside one group, not as global rejections. |
+| **The vendored patterns** | **Generated into a committed module**, `pnpm patterns`, checked in CI | The source is 126 KB of JSON-with-comments that nothing can `require`. Generating it is the only way to know the committed copy still matches after a vendor bump. |
+| **Ashby** | **Moved out of Phase 2** | It renders inside its own iframe, which makes it the Phase 3 problem wearing a Phase 2 label. Two boards were already enough to keep the shared code honest. |
+| **`website`** | **On the denylist, released by evidence** | A real field on Lever and Greenhouse, a honeypot on Workday. It is released only when the field is both visible and labelled, never one, because a honeypot with a visible label would be warning the humans it is trying to catch. |
+| **Cross-layer message routing** | **A `Record` over the protocol type at both hops** | A list of registrations let a message be added everywhere except the one place that routes it, compile cleanly, and fail at runtime as *"the message port closed before a response was received"*. |
+
 ## Still open
 
 One thing, and it is the only one that could still change the shape of the

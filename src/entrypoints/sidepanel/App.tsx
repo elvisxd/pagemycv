@@ -152,21 +152,27 @@ export function App() {
   }, [showImport]);
 
   // Keeps the auto-lock honest: the panel being open is not activity, but
-  // using it is. Polls the state so an expiry is reflected without a reload.
+  // using it is. Polls so an expiry is reflected without a reload.
+  //
+  // It reports a LOCK and nothing else, and it bumps the request counter only
+  // when it has one to report. The earlier version invalidated every refresh
+  // in flight on each tick, including the one loading the profile right after
+  // an import, and the panel then rendered an unlocked vault with no CV and
+  // offered to import over the one just stored. That is the same failure the
+  // atomic transition fixed, arriving from the other side; adding a second
+  // await to refresh() widened the window enough for the gate to catch it.
   useEffect(() => {
     const timer = setInterval(() => {
-      const mine = ++request.current;
       sendVault('vault:state', undefined)
         .then((s) => {
-          if (mine !== request.current) return;
+          if (s.status === 'unlocked') return;
+          request.current++;
           setVault(s);
-          if (s.status !== 'unlocked') {
-            setProfile(null);
-            // A locked vault must not leave a filled-form report on screen
-            // listing what was written from it.
-            setReport(null);
-            setResume(null);
-          }
+          setProfile(null);
+          // A locked vault must not leave a filled-form report on screen
+          // listing what was written from it.
+          setReport(null);
+          setResume(null);
         })
         .catch(() => {});
     }, 30_000);

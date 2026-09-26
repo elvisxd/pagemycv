@@ -43,11 +43,20 @@ function isDisabled(el: Control): boolean {
  * the only way. Bounded, and it stops at the first clipping ancestor small
  * enough to matter.
  */
-function clippedByAncestor(el: Control): boolean {
+function clippedByAncestor(el: Control, memo: Map<Element, boolean>): boolean {
   const view = el.ownerDocument.defaultView;
   if (!view) return false;
   let node: Element | null = el.parentElement;
   for (let i = 0; node && i < MAX_ANCESTORS; i++) {
+    // Fields on a form share almost all of their ancestors, so without this
+    // a hundred-control application costs a few thousand getComputedStyle
+    // calls on the same forty elements. Each one flushes layout.
+    const cached = memo.get(node);
+    if (cached !== undefined) {
+      if (cached) return true;
+      node = node.parentElement;
+      continue;
+    }
     const style = view.getComputedStyle(node);
     const clips =
       style.overflow === 'hidden' ||
@@ -60,9 +69,16 @@ function clippedByAncestor(el: Control): boolean {
       // A clipping box too small to show a field, whatever the field's own
       // rect says. `inset(50%)` leaves zero painted area even on a large box,
       // so it counts on its own.
-      if (rect.width < MIN_VISIBLE_EDGE || rect.height < MIN_VISIBLE_EDGE) return true;
-      if (/^inset\((?:100%|50%|[5-9]\d(?:\.\d+)?%)/.test(style.clipPath)) return true;
+      if (
+        rect.width < MIN_VISIBLE_EDGE ||
+        rect.height < MIN_VISIBLE_EDGE ||
+        /^inset\((?:100%|50%|[5-9]\d(?:\.\d+)?%)/.test(style.clipPath)
+      ) {
+        memo.set(node, true);
+        return true;
+      }
     }
+    memo.set(node, false);
     node = node.parentElement;
   }
   return false;
@@ -71,7 +87,7 @@ function clippedByAncestor(el: Control): boolean {
 /** Kept in step with MIN_EDGE in visibility.ts, which owns the rule. */
 const MIN_VISIBLE_EDGE = 4;
 
-function measure(el: Control, doc: Document): VisibilityMetrics {
+function measure(el: Control, doc: Document, clipMemo: Map<Element, boolean>): VisibilityMetrics {
   const rect = el.getBoundingClientRect();
   const style = el.ownerDocument.defaultView?.getComputedStyle(el);
   const root = doc.documentElement;
@@ -100,7 +116,7 @@ function measure(el: Control, doc: Document): VisibilityMetrics {
             contentVisibilityAuto: true,
           })
         : true,
-    clipped: clippedByAncestor(el),
+    clipped: clippedByAncestor(el, clipMemo),
     documentWidth: Math.max(root.scrollWidth, root.clientWidth),
     documentHeight: Math.max(root.scrollHeight, root.clientHeight),
   };
@@ -200,6 +216,7 @@ export function describeForm(doc: Document = document): {
   const fields: FieldDescriptor[] = [];
   const elements = new Map<string, Control>();
 
+  const clipMemo = new Map<Element, boolean>();
   const all = Array.from(doc.querySelectorAll<Control>(SELECTOR));
   all.forEach((el, index) => {
     const ref = `f${index}`;
@@ -227,7 +244,7 @@ export function describeForm(doc: Document = document): {
       disabled: isDisabled(el),
       readOnly: el instanceof HTMLSelectElement ? false : el.readOnly,
       options: optionsOf(el),
-      metrics: measure(el, doc),
+      metrics: measure(el, doc, clipMemo),
     });
   });
 

@@ -97,6 +97,9 @@ globals.**
 
 ## Folder layout
 
+The shape below is the plan through Phase 6. What Phases 1 and 2 actually
+built is marked **·built**; the rest is still a sketch and will move.
+
 ```
 pagemycv/
 ├── docs/                      # this planning set
@@ -118,18 +121,21 @@ pagemycv/
 │   ├── vault/
 │   │   ├── crypto.ts          # AES-GCM and PBKDF2. No other file imports WebCrypto.
 │   │   └── lock.ts            # unlock, auto-lock, session state
-│   ├── fill/
-│   │   ├── detect.ts          # find fields: autocomplete, then label, then give up
+│   ├── fill/                  # ·built, except as noted
+│   │   ├── types.ts           # the vocabulary; no DOM, no vault
+│   │   ├── descriptor.ts      # the ONLY module that READS the page
+│   │   ├── write.ts           # the ONLY module that WRITES to the page
+│   │   ├── detect.ts          # the four passes, in evidence order
+│   │   ├── sensitive-match.ts # pass 0: spotting a sensitive question
+│   │   ├── plan.ts            # what gets written, and why the rest does not
 │   │   ├── visibility.ts      # the computed visibility gate
 │   │   ├── honeypot.ts        # the denylist
-│   │   ├── write.ts           # the ONLY module that writes to the DOM
-│   │   └── sensitive.ts       # the field class, and the confirmation flow
+│   │   ├── text.ts            # one normalisation, shared by every pass
+│   │   └── chromium-patterns.generated.ts   # from vendor/, by pnpm patterns
 │   ├── ats/
-│   │   ├── registry.ts        # url pattern to adapter
-│   │   ├── lever.ts
-│   │   ├── greenhouse.ts
-│   │   ├── ashby.ts
-│   │   └── workday.ts
+│   │   ├── registry.ts        # ·built. url to ATS, and the per-board maps
+│   │   ├── ashby.ts           # Phase 3, it lives in an iframe
+│   │   └── workday.ts         # Phase 4
 │   ├── byte/
 │   │   └── client.ts          # the ONLY fetch call site in the codebase
 │   ├── frames/
@@ -154,7 +160,8 @@ Three rules that the layout exists to enforce:
 
 - **`src/fill/write.ts` is the only module that writes to the DOM.** Every write
   passes the honeypot denylist, the visibility gate and the sensitive class.
-  One door means one place to audit.
+  One door means one place to audit. `scripts/guard.mjs` fails the build if
+  any other file in the fill path assigns `.value`, `.files` or `.checked`.
 - **`src/byte/client.ts` is the only module that calls `fetch`.** A CI check
   fails the build if a `fetch` appears anywhere else.
 - **`src/db/worker.ts` is the only module that touches SQLite.** Everything else

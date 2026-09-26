@@ -20,7 +20,15 @@ function loadPlaywright() {
 const { chromium } = loadPlaywright();
 
 const EXT = path.join(__dirname, '../../.output/chrome-mv3');
-const PROFILE = path.join(__dirname, '../../.e2e-profile');
+/**
+ * Per-process, because the whole point of this profile is that run 2 opens
+ * the same directory run 1 wrote. A fixed path makes two concurrent gates
+ * share one vault, and the second one deletes it out from under the first:
+ * the failure looks exactly like a race in the extension, which is the last
+ * thing you want to chase while testing a race in the extension. One was
+ * seen, from a stray manual run alongside a stability loop.
+ */
+const PROFILE = path.join(__dirname, `../../.e2e-profile-${process.pid}`);
 const PASSPHRASE = 'correct horse battery staple';
 
 // The real CV when this checkout sits next to Byte, otherwise a fixture with

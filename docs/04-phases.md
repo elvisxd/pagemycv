@@ -133,7 +133,7 @@ The first two passes cover identity, address and phone well. Neither covers work
 history, education, visa status or demographics, which is most of a job
 application. Do not plan around them carrying more than they do.
 
-**Gate: passed.** `node tests/e2e/gate.cjs`, now forty-one checks, run five
+**Gate: passed.** `node tests/e2e/gate.cjs`, now forty-five checks, run several
 times in a row without a failure. The two boards are served from disk by the
 harness through Playwright's `context.route`, so the page commits at the real
 `https://jobs.lever.co/...` and `https://boards.greenhouse.io/...` URL — which
