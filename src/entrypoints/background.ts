@@ -8,11 +8,13 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { atsForUrl } from '../ats/registry';
 import { classify } from '../fill/detect';
+import type { FrameChoice, FrameReport } from '../fill/frames';
+import { chooseFrame, describeFrame } from '../fill/frames';
 import { buildPlan, planNeedsResume } from '../fill/plan';
 import type { FillReport } from '../fill/types';
 import type { DbProtocol } from '../messaging/db';
 import { sendDb } from '../messaging/db';
-import { sendFill } from '../messaging/fill';
+import { onFill, sendFill } from '../messaging/fill';
 import type { VaultProtocol } from '../messaging/vault';
 import { onVault } from '../messaging/vault';
 
@@ -52,7 +54,94 @@ async function withVault<T>(run: () => Promise<T>): Promise<T> {
   return run();
 }
 
-const UNSUPPORTED = 'PageMyCV does not know this page. It works on Lever and Greenhouse job pages.';
+const UNSUPPORTED =
+  'PageMyCV found no Lever or Greenhouse application form on this page, either directly or embedded in it.';
+
+/**
+ * How long to wait for frames to answer a roll call.
+ *
+ * Each answer is a separate message from a content script that is already
+ * running, so this is one process hop rather than a page load. Generous, and
+ * the cost is paid once per fill.
+ */
+const ROLL_CALL_MS = 250;
+
+/**
+ * How long to keep asking before deciding there is no form.
+ *
+ * One pass is not enough. A careers page mounts its embed with script, so the
+ * iframe can still be loading when somebody clicks Fill — and a single roll
+ * call then reports an empty page and the panel says it found no form. That
+ * is not a test artefact: it is what a person sees when they click as soon as
+ * the page looks ready. Found by the gate doing exactly that.
+ *
+ * The budget is spent only on pages where nothing answered, so the ordinary
+ * case still costs one pass.
+ */
+const ROLL_CALL_BUDGET_MS = 2000;
+
+/**
+ * Frames that answered, keyed by tab then frame.
+ *
+ * In memory on purpose. The service worker is terminated after 30 seconds of
+ * idle and this goes with it, which is correct: a frame list older than the
+ * page it describes is worse than no list, and the roll call that rebuilds it
+ * costs a quarter of a second.
+ */
+const roster = new Map<number, Map<number, FrameReport>>();
+
+onFill('fill:here', ({ data, sender }) => {
+  const tabId = sender.tab?.id;
+  // `sender.frameId` is the whole reason this message exists. It is the only
+  // way to learn a frame's id without the `webNavigation` permission, which
+  // would hand us the URL of every frame of every tab. See spikes/phase-3.
+  if (typeof tabId === 'number' && typeof sender.frameId === 'number') {
+    const frames = roster.get(tabId) ?? new Map<number, FrameReport>();
+    frames.set(sender.frameId, { frameId: sender.frameId, ...data });
+    roster.set(tabId, frames);
+  }
+  return { ack: true } as const;
+});
+
+/** Forget a tab's frames the moment the page they described is gone. */
+chrome.tabs.onRemoved.addListener((tabId) => roster.delete(tabId));
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status === 'loading') roster.delete(tabId);
+});
+
+/**
+ * Every frame of this tab that is running our content script.
+ *
+ * A broadcast with no frameId reaches them all but resolves with whichever
+ * answers first, so the answers come back as separate `fill:here` messages
+ * instead and this waits for them to land.
+ */
+async function rollCallOnce(tabId: number): Promise<FrameReport[]> {
+  roster.delete(tabId);
+  // The broadcast itself rejects when NO frame has a listener, which is the
+  // ordinary "this page is not a job board" case rather than a failure.
+  await sendFill('fill:rollCall', undefined, tabId).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, ROLL_CALL_MS));
+  return [...(roster.get(tabId)?.values() ?? [])];
+}
+
+/**
+ * Roll call, repeated until something usable answers or the budget runs out.
+ *
+ * `accept` decides what usable means, so the retry is spent on the question
+ * being asked rather than on any frame at all.
+ */
+async function rollCall(
+  tabId: number,
+  accept: (frames: FrameReport[]) => boolean = (f) => f.length > 0,
+): Promise<FrameReport[]> {
+  const deadline = Date.now() + ROLL_CALL_BUDGET_MS;
+  let frames = await rollCallOnce(tabId);
+  while (!accept(frames) && Date.now() < deadline) {
+    frames = await rollCallOnce(tabId);
+  }
+  return frames;
+}
 
 /**
  * The id of the tab the panel is looking at.
@@ -81,20 +170,24 @@ async function activeTabId(): Promise<number> {
 async function fillActiveTab(): Promise<FillReport> {
   const tabId = await activeTabId();
 
-  // No content script on the page means the page is not one of the two hosts
-  // the manifest lists, because that list is the only way this script is ever
-  // injected. The connection error is the evidence, so it is reported as the
-  // real answer rather than as a failure.
-  // A connection error means there is no content script on the page, which
-  // means the page is not one of the two hosts the manifest lists — that list
-  // is the only way this script is ever injected, so the error IS the answer.
-  // Anything else is a real failure inside the content script and must be
+  // Which frame holds the form. On a board's own page that is the top frame;
+  // on a company careers page it is the board's iframe, and the page around
+  // it is never touched, read, or even reachable — see spikes/phase-3.
+  // Keep asking until a frame with a form answers: an embed mounted by script
+  // may still be loading when the button is clicked.
+  const frames = await rollCall(tabId, (f) => chooseFrame(f) !== null);
+  const choice: FrameChoice | null = chooseFrame(frames);
+  if (!choice) throw new Error(UNSUPPORTED);
+  const target = { tabId, frameId: choice.frame.frameId };
+
+  // A connection error here means the frame went away between the roll call
+  // and now. Anything else is a real failure inside the content script and is
   // reported as itself: reporting a bug of ours as "this site is not
   // supported" is the kind of lie that costs an afternoon.
-  const survey = await sendFill('fill:describe', undefined, tabId).catch((err: unknown) => {
+  const survey = await sendFill('fill:describe', undefined, target).catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     if (/could not establish connection|receiving end does not exist/i.test(message)) {
-      throw new Error(UNSUPPORTED);
+      throw new Error('the form disappeared while it was being read. Try again.');
     }
     throw err;
   });
@@ -108,25 +201,19 @@ async function fillActiveTab(): Promise<FillReport> {
   const classifications = classify(survey.fields, ats);
   const plan = buildPlan(survey.fields, classifications, values, ats, resume?.filename ?? null);
 
-  return sendFill(
+  const report = await sendFill(
     'fill:apply',
     // The bytes cross into the page's process only when the plan has
     // somewhere to put them. See planNeedsResume.
     { plan, resume: planNeedsResume(plan) ? resume : null, generation: survey.generation },
-    tabId,
+    target,
   );
+  // Where it filled, when that was not the page itself. Silence would be
+  // wrong: the click happened on a company careers page and the values went
+  // into a form served by somebody else.
+  return { ...report, frameNote: describeFrame(choice) };
 }
 
-/**
- * Every panel message, mapped to the offscreen message that answers it, or to
- * 'local' when the background handles it itself.
- *
- * A `Record` over the protocol for the same reason the offscreen bridge uses
- * one: a list of `onVault` calls let a message be added everywhere except the
- * one place that routes it, and the only symptom was "the message port closed
- * before a response was received" with no clue which message or which layer.
- * Leaving a key out of this Record is a type error.
- */
 const ROUTES: Record<keyof VaultProtocol, keyof DbProtocol | 'local'> = {
   'vault:state': 'db:state',
   'vault:create': 'db:create',
@@ -150,7 +237,17 @@ for (const [key, target] of Object.entries(ROUTES) as [
 }
 
 onVault('vault:fill', () => withVault(fillActiveTab));
-onVault('vault:clearFill', async () => sendFill('fill:clear', undefined, await activeTabId()));
+onVault('vault:clearFill', async () => {
+  // Every frame that answered, not just the one that was filled: the service
+  // worker may have been terminated since, and a highlight nobody can clear
+  // is a mark left on somebody's page.
+  const tabId = await activeTabId();
+  const frames = await rollCall(tabId);
+  await Promise.all(
+    frames.map((f) => sendFill('fill:clear', undefined, { tabId, frameId: f.frameId })),
+  );
+  return { cleared: true } as const;
+});
 
 export default defineBackground(() => {
   chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});

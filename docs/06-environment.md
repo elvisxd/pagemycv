@@ -131,6 +131,7 @@ pagemycv/
 │   │   ├── plan.ts            # what gets written, and why the rest does not
 │   │   ├── visibility.ts      # the computed visibility gate
 │   │   ├── honeypot.ts        # the denylist
+│   │   ├── frames.ts          # which frame holds the form, when it is embedded
 │   │   └── chromium-patterns.generated.ts   # from vendor/, by pnpm patterns
 │   ├── ats/
 │   │   ├── registry.ts        # ·built. url to ATS, and the per-board maps
@@ -149,7 +150,7 @@ pagemycv/
 │   └── private/               # gitignored, real captures with real data
 ├── tests/
 │   ├── unit/                  # vitest; dom.test.ts runs under jsdom
-│   ├── fixtures/              # the job-board pages the gate serves from disk
+│   ├── fixtures/              # the board pages and one careers page, served from disk
 │   └── e2e/                   # the gate, against a real browser
 ├── .claude/
 │   ├── skills/                # see 08-mcp-and-skills.md

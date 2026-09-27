@@ -1,0 +1,44 @@
+{
+  "permissions": [],
+  "hostPermissions": [],
+  "webNavigationAvailable": false,
+  "framesThatAnnounced": [
+    {
+      "tabId": 1418424959,
+      "frameId": 3,
+      "url": "https://boards.greenhouse.io/embed/job_app?for=acme&token=2272778",
+      "isTop": false,
+      "fields": 4
+    }
+  ],
+  "injectedIntoCrossOriginIframe": true,
+  "injectedIntoParent": false,
+  "embedFrameId": 3,
+  "targetedReadWorks": {
+    "ok": true,
+    "url": "https://boards.greenhouse.io/embed/job_app?for=acme&token=2272778",
+    "fields": 4
+  },
+  "broadcastReturns": {
+    "ok": true,
+    "url": "https://boards.greenhouse.io/embed/job_app?for=acme&token=2272778",
+    "fields": 4
+  },
+  "parentReachable": {
+    "reached": false,
+    "error": "Error: worker.evaluate: Error: Could not establish connection. Receiving end does not exist."
+  },
+  "lateFrameInjected": true,
+  "lateFrames": [
+    {
+      "tabId": 1418424959,
+      "frameId": 4,
+      "url": "https://boards.greenhouse.io/embed/job_app?for=acme&token=2272778",
+      "isTop": false,
+      "fields": 4
+    }
+  ],
+  "aboutBlankFramesInjected": [],
+  "matchAboutBlankLeaksParentOrigin": false,
+  "standaloneStillWorks": true
+}

@@ -226,4 +226,10 @@ export interface FillReport {
   fields: PlannedField[];
   /** Refs the write step could not complete, with the reason. */
   failures: { ref: string; label: string; detail: string }[];
+  /**
+   * Set when the form was not the page itself but an iframe embedded in it.
+   * The user clicked on a company careers page; saying where the values
+   * actually went is the difference between trusted and merely convenient.
+   */
+  frameNote?: string | null;
 }

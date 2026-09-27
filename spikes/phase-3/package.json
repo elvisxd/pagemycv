@@ -1,0 +1,7 @@
+{
+  "name": "pagemycv-phase-3-spikes",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Does an embedded board form need a host permission over the company's careers page? No.",
+  "scripts": { "spike": "node run.cjs" }
+}

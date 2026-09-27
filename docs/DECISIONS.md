@@ -90,6 +90,18 @@ forced by evidence rather than by taste.
 | **A loose option match** | **At least three characters** | `US` is a prefix of `Usually`. The exact matches above still handle a two-letter country code, which is the case that matters. |
 | **Reporting an unreachable content script** | **Only a connection error means "unsupported site"** | `catch(() => UNSUPPORTED)` turned a bug inside our own content script into a claim about the user's page. |
 
+## Decided by the Phase 3 spike, before any of it was built
+
+| Decision | Chose | Because |
+|---|---|---|
+| **Reaching an embedded form** | **`all_frames: true` and nothing else** | Chrome injects into an iframe because the IFRAME's origin is on the match list. The page embedding it is irrelevant to that decision and is never injected. The spike confirms the parent is unreachable — *"Could not establish connection"*. |
+| **`chrome.webNavigation`** | **Not requested** | The plan assumed the declarative flag only covers frames present at load. A frame added two seconds later is injected like any other. The permission would have bought nothing and cost the URL of every frame of every tab. |
+| **A broad host permission at runtime** | **Never asked for** | The gate's wording was "without granting a permanent broad permission". Not asking at all is the stronger answer, and it is available. |
+| **The standalone-URL fallback** | **Dropped** | It existed for the case where a parent content script cannot reach the child. There is no parent content script, and the child reports itself. |
+| **Learning a frame's id** | **A roll call the frames answer by messaging back** | A broadcast with no `frameId` reaches every frame but resolves with whichever answers first, so it cannot enumerate. A message travelling TOWARDS the background carries `sender.frameId`, which is the only way to get it without `webNavigation`. |
+| **Which frame, when there are several** | **Most fields, ties broken by top frame then lowest id** | Deterministic on purpose. A fill that lands somewhere different on the second run is worse than one that refuses. |
+| **Saying where it filled** | **The panel names the board when the form was embedded** | The click happened on a company careers page and the values went into a form served by somebody else. Silence there is the difference between trusted and merely convenient. |
+
 ## Still open
 
 One thing, and it is the only one that could still change the shape of the

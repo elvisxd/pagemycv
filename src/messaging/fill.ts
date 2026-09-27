@@ -13,6 +13,7 @@
 // less round trip and a great deal more data sitting in a page's isolated
 // world.
 import { defineExtensionMessaging } from '@webext-core/messaging';
+import type { FrameReport } from '../fill/frames';
 import type { FieldDescriptor, FillReport, FillRequest } from '../fill/types';
 
 export interface PageSurvey {
@@ -29,6 +30,20 @@ export interface PageSurvey {
 }
 
 interface FillProtocol {
+  /**
+   * Broadcast to every frame of a tab. Each one answers by sending `fill:here`
+   * BACK to the background, which is the point: a message travelling that
+   * direction carries `sender.frameId`, and that is the only way to learn a
+   * frame's id without the `webNavigation` permission. Proven in
+   * spikes/phase-3.
+   *
+   * The reply to this message is deliberately useless. A broadcast with no
+   * frameId resolves with whichever frame answers first, so the roll call is
+   * collected from the `fill:here` messages instead.
+   */
+  'fill:rollCall'(): { ack: true };
+  /** Content script to background. Read for its sender, not its payload. */
+  'fill:here'(data: Omit<FrameReport, 'frameId'>): { ack: true };
   /** Read the page. Writes nothing. */
   'fill:describe'(): PageSurvey;
   /** Execute a plan the background built. Returns what actually happened. */
