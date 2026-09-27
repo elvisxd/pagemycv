@@ -9,10 +9,10 @@
 // ATS registry uses, so adding a board cannot quietly widen the extension's
 // reach without also changing the registry the classifier reads.
 import { defineContentScript } from 'wxt/utils/define-content-script';
-import { CONTENT_MATCHES } from '../ats/registry';
+import { atsForUrl, CONTENT_MATCHES } from '../ats/registry';
 import type { Control } from '../fill/descriptor';
-import { countFillable, describeForm } from '../fill/descriptor';
-import { applyPlan, clearHighlights } from '../fill/write';
+import { countFillable, describeForm, describeListboxes } from '../fill/descriptor';
+import { applyListboxes, applyPlan, clearHighlights } from '../fill/write';
 import { onFill, sendFill } from '../messaging/fill';
 
 export default defineContentScript({
@@ -47,6 +47,8 @@ export default defineContentScript({
      * either way; the list of what was considered does not have to be.
      */
     let elements = new Map<string, Control>();
+    /** The same, for custom dropdowns, which are containers rather than controls. */
+    let listboxes = new Map<string, Element>();
     /**
      * Bumped on every describe. A plan carries the number it was built from,
      * and a plan from an older pass is refused rather than applied to the
@@ -77,8 +79,16 @@ export default defineContentScript({
     onFill('fill:describe', () => {
       const survey = describeForm(document);
       elements = survey.elements;
+      // Only where the ATS says it has custom dropdowns. Running the pass on
+      // Lever or Greenhouse would be looking for a mechanism they do not use
+      // and reporting whatever happened to match.
+      const selectors = atsForUrl(location.href).listbox;
+      const boxes = selectors
+        ? describeListboxes(document, selectors)
+        : { boxes: [], elements: new Map<string, Element>() };
+      listboxes = boxes.elements;
       generation++;
-      return { url: location.href, fields: survey.fields, generation };
+      return { url: location.href, fields: survey.fields, listboxes: boxes.boxes, generation };
     });
 
     onFill('fill:apply', ({ data }) => {
@@ -87,7 +97,24 @@ export default defineContentScript({
           'the page was read again before this fill could run, so nothing was written. Try again.',
         );
       }
-      return applyPlan(data.plan.fields, elements, data.resume, location.href, data.plan.ats);
+      const report = applyPlan(
+        data.plan.fields,
+        elements,
+        data.resume,
+        location.href,
+        data.plan.ats,
+      );
+      const dropdowns = applyListboxes(
+        data.plan.listboxes,
+        listboxes,
+        atsForUrl(location.href).listbox,
+      );
+      return {
+        ...report,
+        selected: dropdowns.selected,
+        skipped: report.skipped + dropdowns.skipped,
+        failures: [...report.failures, ...dropdowns.failures],
+      };
     });
 
     onFill('fill:clear', () => {

@@ -231,7 +231,10 @@ export function buildPlan(
     });
   }
 
-  return { ats: ats.id, fields: planned };
+  // Listboxes are planned by planListboxes, which needs the descriptors this
+  // function never sees. Empty rather than optional, so a caller that
+  // forgets them writes nothing instead of writing undefined.
+  return { ats: ats.id, fields: planned, listboxes: [] };
 }
 
 /**

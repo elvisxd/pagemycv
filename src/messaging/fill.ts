@@ -14,12 +14,18 @@
 // world.
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { FrameReport } from '../fill/frames';
-import type { FieldDescriptor, FillReport, FillRequest } from '../fill/types';
+import type { FieldDescriptor, FillReport, FillRequest, ListboxDescriptor } from '../fill/types';
 
 export interface PageSurvey {
   url: string;
   /** Every control on the page, flattened. Page text, treated as data. */
   fields: FieldDescriptor[];
+  /**
+   * Custom dropdowns, which `fields` cannot contain because they are not
+   * controls — a Workday dropdown is a button and a menu. Page text, treated
+   * as data, exactly like `fields`.
+   */
+  listboxes: ListboxDescriptor[];
   /**
    * Which describe pass produced this. The plan built from it carries the
    * same number back, and the content script refuses a plan from an older

@@ -10,6 +10,7 @@ import { atsForUrl } from '../ats/registry';
 import { classify } from '../fill/detect';
 import type { FrameChoice, FrameReport } from '../fill/frames';
 import { chooseFrame, describeFrame } from '../fill/frames';
+import { planListboxes } from '../fill/listbox';
 import { buildPlan, planNeedsResume } from '../fill/plan';
 import { isNoListener, rollCall } from '../fill/roll-call';
 import type { FillReport } from '../fill/types';
@@ -222,6 +223,10 @@ async function fillActiveTab(): Promise<FillReport> {
   const { values, resume } = await sendDb('db:fillValues', undefined);
   const classifications = classify(survey.fields, ats);
   const plan = buildPlan(survey.fields, classifications, values, ats, resume?.filename ?? null);
+  // Planned here, in the background, for the same reason the fields are: the
+  // content script is handed the one value it is going to write and never
+  // the profile it came from.
+  plan.listboxes = planListboxes(survey.listboxes, values, ats);
 
   const report = await sendFill(
     'fill:apply',

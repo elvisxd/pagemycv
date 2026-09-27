@@ -221,6 +221,13 @@ forbid(/crypto\s*\??\.\s*subtle|\bsubtle\b\s*\./, 'crypto.subtle outside the one
   'src/vault/crypto.ts',
 ]);
 forbid(/sqlite3InitModule|OpfsSAHPoolDb/, 'SQLite outside the one door', ['src/db/worker.ts']);
+// Reaching into a closed shadow root is a capability, not a utility. A second
+// caller is a second place that can forget the closed case — and the closed
+// case fails silently: a flat query just returns nothing, so the form reads
+// as empty rather than as unreadable.
+forbid(/openOrClosedShadowRoot/, 'the shadow-root door is src/fill/shadow.ts', [
+  'src/fill/shadow.ts',
+]);
 // The key is matched by what it IS, not by what it is called.
 forbid(
   /storage\.(local|session|managed)\.set|indexedDB\.|\bcaches\b\./,
@@ -315,7 +322,15 @@ if (contentText) {
   if (hosts.length === 0) {
     fail(registryPath, 'no host list could be read; the guard cannot verify the reach');
   }
-  const ALLOWED_HOSTS = ['jobs.lever.co', 'boards.greenhouse.io', 'job-boards.greenhouse.io'];
+  const ALLOWED_HOSTS = [
+    'jobs.lever.co',
+    'boards.greenhouse.io',
+    'job-boards.greenhouse.io',
+    // Subdomains only. Every Workday tenant has its own, so the host cannot
+    // be enumerated; the apex is not an application form and the registry
+    // returns `unknown` for it.
+    '*.myworkdayjobs.com',
+  ];
   for (const h of hosts) {
     if (!ALLOWED_HOSTS.includes(h)) {
       fail(registryPath, `host "${h}" is not on the allowlist in scripts/guard.mjs`);
@@ -344,6 +359,7 @@ const ENFORCED = [
   'invariant 5, one network door',
   'the vault key never reaches persistent storage',
   'one door each to crypto.subtle, to SQLite and to writing the page',
+  'one door into closed shadow roots',
   'the writer re-checks the element before it writes',
   'no telemetry, direct or transitive',
   'the manifest permissions and CSP, and no host_permissions',

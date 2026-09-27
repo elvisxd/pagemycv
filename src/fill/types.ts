@@ -3,6 +3,33 @@
 // records, which is what makes the interesting logic testable without a
 // browser.
 
+/** How to drive one family of custom listbox. All four are required. */
+export interface ListboxSelectors {
+  /** The wrapper that carries the field's identity. */
+  container: string;
+  /** What to dispatch a click at to open the menu. */
+  trigger: string;
+  /** The options, queried AFTER the trigger, in the same task. */
+  option: string;
+  /** Where the chosen text ends up, for the read-back that proves it landed. */
+  display: string;
+}
+
+export interface ListboxDescriptor {
+  ref: string;
+  /** `data-automation-id` on the container, which is the ATS's own contract. */
+  automationId: string;
+  label: string;
+  /** What it already reads, so an answered question is left alone. */
+  current: string;
+}
+
+export type ListboxAction =
+  | { action: 'select'; ref: string; label: string; kind: FieldKind; value: string }
+  | { action: 'skip'; ref: string; label: string; reason: ListboxSkip };
+
+export type ListboxSkip = 'unrecognised' | 'no-value' | 'already-filled' | 'unsupported';
+
 /** What we can recognise on a form. Sensitive keys are the registry's, not these. */
 export type FieldKind =
   | 'given_name'
@@ -175,6 +202,15 @@ export type PlannedField =
 export interface FillPlan {
   ats: string;
   fields: PlannedField[];
+  /**
+   * Custom dropdowns, which are not `<select>` and so are not `fields`.
+   *
+   * A separate list because they are driven by a separate mechanism: a
+   * synchronous open-and-pick rather than a value assignment. Keeping them
+   * apart is what stops that mechanism from touching the path that already
+   * fills Lever and Greenhouse.
+   */
+  listboxes: ListboxAction[];
 }
 
 /**
@@ -222,6 +258,11 @@ export interface FillReport {
   ats: string;
   filled: number;
   attached: number;
+  /** Custom dropdowns answered. Counted apart from `filled` because the
+   *  mechanism is different and, unlike `filled`, unverified on a real
+   *  tenant — a number that means less should not be added to one that
+   *  means more. */
+  selected: number;
   skipped: number;
   fields: PlannedField[];
   /** Refs the write step could not complete, with the reason. */
