@@ -245,12 +245,18 @@ export function App() {
     setError(null);
     try {
       const result = await sendVault('vault:importCv', { markdown });
+      setMarkdown('');
+      setShowImport(false);
+      // Refresh BEFORE announcing the result. Announcing first says "5 roles,
+      // 2 degrees" while the list below still shows what was there before,
+      // which is a promise made ahead of the thing it promises. The gate read
+      // the panel the moment that text appeared and found no experience
+      // section at all, and adding a third call to refresh() widened the
+      // window enough for it to happen most runs.
+      await refresh();
       setImported(
         `${result.counts.work} roles, ${result.counts.education} degrees, ${result.counts.links} links`,
       );
-      setMarkdown('');
-      setShowImport(false);
-      await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>About Acme</title></head>
+  <body>
+    <h1>About Acme</h1>
+    <!-- No board iframe, so no content script runs anywhere in this tab. The
+         extension must say so at once: a page with no content script cannot
+         grow one by being asked again, and the retry budget spent here made
+         an ordinary page take two seconds to answer. -->
+    <form><label for="n">Newsletter</label><input id="n" name="newsletter" type="email" /></form>
+  </body>
+</html>

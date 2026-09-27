@@ -11,7 +11,7 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { CONTENT_MATCHES } from '../ats/registry';
 import type { Control } from '../fill/descriptor';
-import { describeForm } from '../fill/descriptor';
+import { countFillable, describeForm } from '../fill/descriptor';
 import { applyPlan, clearHighlights } from '../fill/write';
 import { onFill, sendFill } from '../messaging/fill';
 
@@ -55,11 +55,16 @@ export default defineContentScript({
      */
     let generation = 0;
 
-    /** What this frame is, for the background's roll call. */
-    const self = () => ({
-      url: location.href,
-      fields: document.querySelectorAll('input, select, textarea').length,
-    });
+    /**
+     * What this frame is, for the background's roll call.
+     *
+     * The count comes from descriptor.ts rather than from a selector written
+     * out again here. The two had already drifted: this counted every
+     * control, hidden inputs and submit buttons included, and that count is
+     * what ranks frames against each other when a careers page embeds more
+     * than one form.
+     */
+    const self = () => ({ url: location.href, fields: countFillable(document) });
 
     // Sent TO the background, so it arrives carrying this frame's id. A reply
     // to a broadcast cannot do that: the broadcast resolves with whichever

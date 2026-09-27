@@ -78,6 +78,18 @@ const BOARDS = {
     url: 'https://jobs.lever.co/acme/no-file-here/apply',
     file: path.join(__dirname, '../fixtures/lever-nofile.html'),
   },
+  // A board page with no application form. The content script runs here, so
+  // the refusal must name the right reason.
+  listing: {
+    url: 'https://jobs.lever.co/acme/',
+    file: path.join(__dirname, '../fixtures/board-listing.html'),
+  },
+  // A careers page with no embed at all. No content script anywhere, so the
+  // refusal must be immediate rather than spending the retry budget.
+  plainPage: {
+    url: 'https://careers.acme.test/about-us',
+    file: path.join(__dirname, '../fixtures/careers-no-embed.html'),
+  },
   // Phase 3: the case that is actually most applications. A company careers
   // page embedding the board's form in a cross-origin iframe.
   careers: {
@@ -373,6 +385,7 @@ async function main() {
     // presence here is itself part of what is being tested.
     await job.bringToFront();
 
+    const clickedAt = Date.now();
     await page.getByRole('button', { name: 'Fill this form' }).click();
     // Whichever lands first. Waiting only for the report turns "the panel
     // refused and said why" into a sixty-second timeout and a crash, which
@@ -392,6 +405,7 @@ async function main() {
       return {
         job,
         failed: outcome.error,
+        refusedAfterMs: Date.now() - clickedAt,
         state: { values: {}, submits: 0, fileSize: 0 },
         report: '',
         review: '',
@@ -685,6 +699,41 @@ async function main() {
     `embed ${careers.state.submits}, parent ${careers.parentSubmits}`,
   );
   await careers.job.close();
+
+  // ── The two refusals, which used to be one ──────────────────────────
+  //
+  // A board page with no form, and a page with no content script at all, are
+  // different problems with different answers. They shared one message, and
+  // the second one spent the roll call's whole retry budget before giving it.
+  const listing = await fillBoard('listing');
+  check(
+    'a board page with no form is refused, and says so',
+    /no application form on it/i.test(listing.failed ?? ''),
+    listing.failed ?? '(it filled something)',
+  );
+  await listing.job.close();
+
+  const plain = await fillBoard('plainPage');
+  check(
+    'a page with no content script is refused with a DIFFERENT reason',
+    /does not know this page/i.test(plain.failed ?? ''),
+    plain.failed ?? '(it filled something)',
+  );
+  // The regression this measures: spending the LONG retry budget on a page
+  // that has no content script made an ordinary page take over two seconds to
+  // answer. It now spends the short silence budget instead.
+  //
+  // The threshold is the long budget rather than a tighter round number. What
+  // matters is the distance from the failure mode — the bug measured 2356ms,
+  // the fix measures around 1300 — and a tighter bound would fail on a slow
+  // runner for margin rather than for a regression, which is the kind of
+  // check that gets deleted instead of read.
+  check(
+    'and refused without spending the LONG retry budget',
+    (plain.refusedAfterMs ?? 99999) < 2000,
+    `${plain.refusedAfterMs}ms, against a 2000ms budget`,
+  );
+  await plain.job.close();
 
   // The gate's own wording: without a permanent broad permission. It asks for
   // none, which is stronger than asking for one at runtime.
