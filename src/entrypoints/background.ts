@@ -6,7 +6,7 @@
 // FileSystemFileHandle.createSyncAccessHandle are both absent, verified in a
 // real browser, see spikes/phase-0.
 import { defineBackground } from 'wxt/utils/define-background';
-import { atsForUrl } from '../ats/registry';
+import { ATS_DEFINITIONS, atsForUrl } from '../ats/registry';
 import { classify } from '../fill/detect';
 import type { FrameChoice, FrameReport } from '../fill/frames';
 import { chooseFrame, describeFrame } from '../fill/frames';
@@ -57,8 +57,22 @@ async function withVault<T>(run: () => Promise<T>): Promise<T> {
 }
 
 /** The page is not a job board at all: no frame is running our content script. */
-const NOT_A_BOARD =
-  'PageMyCV does not know this page. It works on Lever and Greenhouse application forms, including ones embedded in a company careers page.';
+/**
+ * The boards it knows, in the message, derived from the registry.
+ *
+ * It was a hand-written sentence naming Lever and Greenhouse. Ashby was added
+ * and the sentence was not, so the extension told people it did not support a
+ * board it had just started supporting — a lie in the one place someone looks
+ * when a fill does not work. Derived now, for the same reason
+ * `CONTENT_MATCHES` is: adding a board cannot leave this behind.
+ */
+function boardList(): string {
+  const names = ATS_DEFINITIONS.map((d) => d.label);
+  if (names.length <= 1) return names[0] ?? 'no boards yet';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+const NOT_A_BOARD = `PageMyCV does not know this page. It works on ${boardList()} application forms, including ones embedded in a company careers page.`;
 
 /**
  * It IS a board, and there is no form on it.

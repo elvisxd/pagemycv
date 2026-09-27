@@ -237,3 +237,20 @@ describe('preferred name is never inferred', () => {
     expect(row.reason).toBe('unanswered');
   });
 });
+
+describe('the refusal message names every board it supports', () => {
+  it('has a label for each definition, so the message can name them all', () => {
+    // The message in background.ts is built from these. It used to be a
+    // hand-written sentence naming two boards; Ashby was added and the
+    // sentence was not, so the extension told people it did not support a
+    // board it had just started supporting — in the one place somebody
+    // looks when a fill does not work.
+    for (const def of ATS_DEFINITIONS) {
+      expect(def.label.trim()).not.toBe('');
+      expect(def.hosts.length).toBeGreaterThan(0);
+    }
+    expect(ATS_DEFINITIONS.map((d) => d.label)).toEqual(
+      expect.arrayContaining(['Lever', 'Greenhouse', 'Ashby', 'Workday']),
+    );
+  });
+});
