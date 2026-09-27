@@ -1,0 +1,104 @@
+{
+  "verifiedAboutTheBrowser": {
+    "apiPresent": {
+      "chromeDom": "object",
+      "openOrClosedShadowRoot": "function"
+    },
+    "rootsReallyClosed": [
+      {
+        "host": "myInformation",
+        "pageVisible": false,
+        "weCanSee": true
+      },
+      {
+        "host": "framed",
+        "pageVisible": false,
+        "weCanSee": true
+      }
+    ],
+    "reach": {
+      "flat": 0,
+      "deep": 4,
+      "names": [
+        "firstName",
+        "lastName",
+        "beecatcher",
+        "deeplyNested"
+      ]
+    },
+    "write": {
+      "found": true,
+      "value": "Ada",
+      "heardInsideShadow": "firstName=Ada",
+      "heardAtDocument": "(nothing)"
+    },
+    "writeComposed": {
+      "found": true,
+      "value": "Lovelace",
+      "heardAtDocument": "my-information;"
+    },
+    "visibility": {
+      "firstName": {
+        "checkVisibility": true,
+        "rect": {
+          "width": 185,
+          "height": 21
+        }
+      },
+      "beecatcher": {
+        "checkVisibility": true,
+        "rect": {
+          "width": 9,
+          "height": 7
+        }
+      }
+    },
+    "labels": {
+      "found": true,
+      "id": "firstName-input",
+      "viaDocument": false,
+      "viaDocumentQuery": false,
+      "rootIsShadow": true,
+      "viaRootQuery": "First Name",
+      "viaLabelsProperty": [
+        "First Name"
+      ],
+      "closestForm": false
+    },
+    "frameInShadow": {
+      "hostFound": true,
+      "iframeFound": true,
+      "src": "https://acme.wd5.myworkdayjobs.com/embedded-step"
+    },
+    "frameInShadowInjected": true,
+    "framesSeen": [
+      {
+        "frameId": 3,
+        "url": "https://acme.wd5.myworkdayjobs.com/embedded-step",
+        "isTop": false
+      },
+      {
+        "frameId": 0,
+        "url": "https://acme.wd5.myworkdayjobs.com/en-US/acme/job/Madrid/Engineer_R-1/apply/applyManually",
+        "isTop": true
+      }
+    ]
+  },
+  "modelledOnDocumentedBehaviour": {
+    "overlay": {
+      "found": true,
+      "elementAtPoint": "clickBlocker",
+      "intercepted": true,
+      "dispatchedClickLanded": true
+    },
+    "listboxSync": {
+      "found": true,
+      "optionsSynchronously": 3
+    },
+    "listboxAsync": {
+      "found": true,
+      "optionsAfterOneTask": 0
+    },
+    "realClickTimesOut": true
+  }
+}
