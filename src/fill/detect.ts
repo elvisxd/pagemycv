@@ -192,6 +192,16 @@ function fromAts(field: FieldDescriptor, table: Map<string, FieldKind>): FieldKi
  * already does better.
  */
 const LABEL_RULES: readonly { kind: FieldKind; pattern: RegExp; not?: RegExp }[] = [
+  {
+    // Chromium has no preferred-name type at all: `FULL_NAME` matches
+    // `full.?name`, so "Preferred Full Name" was classified as the legal
+    // name and filled with it. `NAME_IGNORED` covers `nickname` but not
+    // `preferred`, so nothing vetoed it either. See SHARPER_THAN_CHROMIUM.
+    kind: 'preferred_name',
+    pattern:
+      /\bpreferred\b[^.?]{0,20}\bname\b|\bnickname\b|\bgoes by\b|\bname you go by\b|\bwhat should we call you\b/,
+    not: /\blegal\b/,
+  },
   { kind: 'linkedin_url', pattern: /\blinked\s?in\b/ },
   { kind: 'github_url', pattern: /\bgit\s?hub\b|\bgitlab\b/ },
   {
@@ -210,9 +220,28 @@ const LABEL_RULES: readonly { kind: FieldKind; pattern: RegExp; not?: RegExp }[]
     not: /\b(salutation|prefix|honorific|job posting|position applied|role applied)\b/,
   },
   {
+    // BEFORE current_employer, and the ordering is the fix rather than a
+    // preference. "How much notice would you need to give your current
+    // employer before starting in this role?" contains the word `employer`,
+    // and the broad alternative below matched it first: the box asking when
+    // you can start was filled with the name of the company you work for.
+    // The right value in the wrong box, which is the failure this project
+    // treats as worse than a blank.
+    //
+    // Same convention sensitive-match.ts already states and this list did not
+    // follow: narrow questions before broad ones.
+    kind: 'notice_period',
+    pattern:
+      /\bnotice period\b|\bhow (much|long a?) notice\b|\bnotice (required|needed|to give)\b|\bavailable to start\b|\bstart date\b|\bavailability\b|\bhow soon can you start\b|\bwhen (can|could|would) you (be able to )?start\b|\bearliest (possible )?start\b/,
+  },
+  {
     kind: 'current_employer',
     pattern:
       /\b(current|present|most recent|latest)\b[^.?]{0,20}\b(employer|company|organi[sz]ation)\b|\bemployer\b/,
+    // Belt as well as braces. Ordering alone is one careless reshuffle away
+    // from putting the bug back, and this rule is the one with a bare
+    // `employer` alternative that reaches into other people's questions.
+    not: /\bnotice\b|\bwhen (can|could|would) you\b|\bhow soon\b|\bstart (date|ing)\b/,
   },
   { kind: 'education_school', pattern: /\b(school|universit\w+|college|institution|alma mater)\b/ },
   { kind: 'education_degree', pattern: /\bdegree\b|\bqualification\b/ },
@@ -223,14 +252,53 @@ const LABEL_RULES: readonly { kind: FieldKind; pattern: RegExp; not?: RegExp }[]
   },
   { kind: 'resume_file', pattern: /\b(resume|cv|curriculum vitae)\b/ },
   {
-    kind: 'notice_period',
-    pattern: /\bnotice period\b|\bavailable to start\b|\bstart date\b|\bavailability\b/,
-  },
-  {
     kind: 'how_did_you_hear',
     pattern: /\bhow did you (hear|find|learn)\b|\breferr?al source\b|\bwhere did you (hear|find)\b/,
   },
+  {
+    // Ashby asks for the whole place in one box where the other two boards
+    // ask for city and region separately.
+    kind: 'location',
+    pattern:
+      /^location$|\b(your|current) location\b|\bwhere are you (based|located)\b|\bcity and (state|province|region|country)\b/,
+    // A work-location preference is a different question, and so is the
+    // posting's own location.
+    not: /\b(preference|type|remote|hybrid|on ?site|willing|relocat\w+|job|role|office)\b/,
+  },
+  {
+    kind: 'relocation_ok',
+    pattern: /\brelocat\w+\b/,
+  },
+  {
+    kind: 'travel_ok',
+    pattern: /\btravel\b/,
+    // The posting describes travel; the question asks whether you accept it.
+    not: /\breimburse\w*\b|\bexpense\b/,
+  },
+  {
+    kind: 'security_clearance',
+    pattern: /\bsecurity clearance\b|\bclearance (level|status|with)\b|\bactive clearance\b/,
+  },
 ];
+
+/**
+ * Kinds where OUR label rule beats Chromium's guess.
+ *
+ * Normally Chromium wins: its patterns carry a negative half that hand-rolled
+ * heuristics forget, which is most of why they are vendored at all. This set
+ * is for the cases where Chromium has no type for the question, so a broader
+ * type of its own claims the field and is confidently wrong.
+ *
+ * `preferred_name` is the whole set today. Chromium's `FULL_NAME` matches
+ * `full.?name`, so "Preferred Full Name" — which Ashby puts directly above
+ * "Legal Full Name" — was classified as the legal name and filled with it.
+ * `NAME_IGNORED` covers `nickname` but not `preferred`, so nothing vetoed it.
+ *
+ * Kept as an explicit list rather than a general rule: "our heuristic beats
+ * the vendored one" is the wrong default, and every entry here should have to
+ * justify itself the way this one does.
+ */
+const SHARPER_THAN_CHROMIUM: ReadonlySet<FieldKind> = new Set<FieldKind>(['preferred_name']);
 
 function normalise(field: FieldDescriptor): string {
   return normaliseText(
@@ -314,19 +382,20 @@ export function classify(fields: readonly FieldDescriptor[], ats: AtsDefinition)
         strategy = 'ats';
       }
     }
+    // Resolved before the Chromium branch because it can override it, and
+    // skipped entirely when a higher pass has already answered.
+    const labelGuess = kind ? null : fromLabel(field);
+
     if (!kind && chromiumApplies) {
       const guess = chromiumGuesses.get(field.ref);
-      if (guess) {
+      if (guess && !(labelGuess && SHARPER_THAN_CHROMIUM.has(labelGuess))) {
         kind = guess;
         strategy = 'chromium';
       }
     }
-    if (!kind) {
-      const guess = fromLabel(field);
-      if (guess) {
-        kind = guess;
-        strategy = 'label';
-      }
+    if (!kind && labelGuess) {
+      kind = labelGuess;
+      strategy = 'label';
     }
 
     out.push({

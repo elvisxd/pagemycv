@@ -6,7 +6,8 @@
 // cannot host this: it has neither that API nor the Worker constructor needed
 // to delegate. Both were confirmed in a real browser, see spikes/phase-0.
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import type { FillValues, ResumeFile } from '../fill/types';
+import type { FieldKind, FillValues, ResumeFile, ScreeningAnswers } from '../fill/types';
+import { SCREENING_KINDS } from '../fill/types';
 import { parseCvMarkdown } from '../import/cv-markdown';
 import { SENSITIVE_FIELDS } from '../sensitive/registry';
 import {
@@ -21,6 +22,7 @@ import {
   randomSalt,
 } from '../vault/crypto';
 import INITIAL_SQL from './migrations/001_initial.sql?raw';
+import SCREENING_SQL from './migrations/002_screening_answers.sql?raw';
 import type { ProfileView, ResumeMeta, VaultState } from './schema';
 
 const DB_PATH = '/pagemycv.sqlite3';
@@ -90,16 +92,37 @@ function openDatabase(): Promise<Db> {
   return opening;
 }
 
+/**
+ * Ordered, and applied in order from whatever version the file is at.
+ *
+ * A list rather than the single hardcoded step this used to be, because 002
+ * is the first schema change to meet a vault that already holds somebody's
+ * CV. Each step runs in its own transaction and sets the version inside it,
+ * so a failure half way leaves the file at the last version that fully
+ * applied rather than at a version whose tables do not all exist.
+ */
+const MIGRATIONS: readonly { version: number; sql: string }[] = [
+  { version: 1, sql: INITIAL_SQL },
+  { version: 2, sql: SCREENING_SQL },
+];
+
+const LATEST = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+
 function migrate(handle: Db): void {
   const version = handle.selectValue('PRAGMA user_version') as number;
-  if (version > 1) {
+  if (version > LATEST) {
     throw new Error(`this vault was written by a newer version (schema ${version})`);
   }
-  if (version < 1) {
+  for (const step of MIGRATIONS) {
+    if (version >= step.version) continue;
+    // The version is an integer from the literal list above and never from
+    // anything a page or a file could influence, which is what makes the
+    // interpolation below safe. Asserted rather than assumed.
+    if (!Number.isInteger(step.version)) throw new Error('migration version must be an integer');
     handle.exec('BEGIN');
     try {
-      handle.exec(INITIAL_SQL);
-      handle.exec('PRAGMA user_version = 1');
+      handle.exec(step.sql);
+      handle.exec(`PRAGMA user_version = ${step.version}`);
       handle.exec('COMMIT');
     } catch (err) {
       // A rollback that itself throws must not replace the real error.
@@ -557,6 +580,61 @@ async function readFillValues(): Promise<{ values: FillValues; resume: ResumeFil
   return { values, resume: await readResume(lease) };
 }
 
+/**
+ * Your own answers to the screening questions.
+ *
+ * Each row is keyed by field kind, and the AAD binds the ciphertext to that
+ * kind and that column, so an answer moved to another row stops decrypting —
+ * the same guarantee every other personal column has. A decryption that
+ * fails is skipped rather than thrown: one unreadable answer should leave
+ * the rest of a fill working.
+ */
+async function readScreeningAnswers(): Promise<ScreeningAnswers> {
+  const lease = requireKey();
+  const out: ScreeningAnswers = {};
+  for (const row of rows<{ kind: string; answer_enc: Uint8Array }>(
+    'SELECT kind, answer_enc FROM screening_answer',
+  )) {
+    if (!SCREENING_KINDS.includes(row.kind as FieldKind)) continue;
+    try {
+      out[row.kind as FieldKind] = await decryptValue(
+        stillLeased(lease),
+        new Uint8Array(row.answer_enc),
+        `screening:${row.kind}`,
+        'answer_enc',
+      );
+    } catch {}
+  }
+  return out;
+}
+
+async function setScreeningAnswer(kind: string, answer: string): Promise<{ saved: true }> {
+  const lease = requireKey();
+  // The kind has to be one we know. A row keyed by anything else could never
+  // be read back by the fill path, so storing it would be a silent no-op
+  // that looks like it worked.
+  if (!SCREENING_KINDS.includes(kind as FieldKind)) {
+    throw new Error(`${kind} is not a screening question`);
+  }
+  const trimmed = answer.trim();
+  const t = Date.now();
+  if (!trimmed) {
+    // Clearing is deleting. An empty ciphertext would still be a stored
+    // answer as far as the planner is concerned.
+    db?.exec({ sql: 'DELETE FROM screening_answer WHERE kind = ?', bind: [kind] });
+    return { saved: true };
+  }
+  const enc = await encryptValue(stillLeased(lease), trimmed, `screening:${kind}`, 'answer_enc');
+  db?.exec({
+    sql: `INSERT INTO screening_answer (kind, answer_enc, updated_at) VALUES (?, ?, ?)
+          ON CONFLICT(kind) DO UPDATE SET
+            answer_enc = excluded.answer_enc,
+            updated_at = excluded.updated_at`,
+    bind: [kind, enc, t],
+  });
+  return { saved: true };
+}
+
 const handlers: Record<string, (payload: Record<string, string>) => Promise<unknown>> = {
   async state() {
     await openDatabase();
@@ -589,6 +667,14 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
   async fillValues() {
     await openDatabase();
     return readFillValues();
+  },
+  async screeningAnswers() {
+    await openDatabase();
+    return readScreeningAnswers();
+  },
+  async setScreeningAnswer({ kind, answer }) {
+    await openDatabase();
+    return setScreeningAnswer(kind ?? '', answer ?? '');
   },
   async setResume({ filename, mimeType, base64 }) {
     await openDatabase();

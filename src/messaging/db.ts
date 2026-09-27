@@ -4,7 +4,7 @@
 // Keys are prefixed 'db:' so they cannot be confused with the 'vault:' channel.
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { ProfileView, ResumeMeta, VaultState } from '../db/schema';
-import type { FillValues, ResumeFile } from '../fill/types';
+import type { FillValues, ResumeFile, ScreeningAnswers } from '../fill/types';
 
 export interface DbProtocol {
   'db:state'(): VaultState;
@@ -25,6 +25,10 @@ export interface DbProtocol {
     meta: ResumeMeta;
   };
   'db:resumeMeta'(): ResumeMeta | null;
+  /** Your own answers to the screening questions, decrypted. */
+  'db:screeningAnswers'(): ScreeningAnswers;
+  /** Store one. An empty answer deletes it rather than storing a blank. */
+  'db:setScreeningAnswer'(data: { kind: string; answer: string }): { saved: true };
 }
 
 export const { sendMessage: sendDb, onMessage: onDb } = defineExtensionMessaging<DbProtocol>();

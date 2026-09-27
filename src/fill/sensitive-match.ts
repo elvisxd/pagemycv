@@ -64,8 +64,17 @@ const MATCHERS: readonly Matcher[] = [
   },
   {
     key: 'salary_expected',
+    // The phrasings below are the ones a real form uses, and the first
+    // version of this matched none of them. "What are you looking for as a
+    // base salary?" came back UNRECOGNISED — not filled, but only because
+    // the vault had no number to fill it with. Protected by accident rather
+    // than by design, and the person never saw the one thing the registry
+    // exists to tell them: that the first number spoken usually wins.
     pattern:
-      /\b(expected|desired|target|requested)\b[^.?]{0,20}\b(salary|compensation|pay|rate|remuneration)\b|\bsalary (expectation|requirement)s?\b|\bcompensation expectation\b/,
+      /\b(expected|desired|target|requested|preferred)\b[^.?]{0,20}\b(salary|compensation|pay|rate|remuneration)\b|\bsalary (expectation|requirement|range)s?\b|\bcompensation (expectation|requirement)s?\b|\b(looking for|seeking|asking)\b[^.?]{0,30}\b(salary|compensation|pay|rate)\b|\bbase salary\b|\bwhat (salary|compensation|rate)\b|\bsalary requirements?\b/,
+    // The posting's own advertised band is not a question being asked of you.
+    // Ashby prints "Compensation" and a range on the same page as the form.
+    except: /\b(offered|this role pays|posted (salary|range)|salary band for)\b/,
   },
   {
     key: 'salary_current',

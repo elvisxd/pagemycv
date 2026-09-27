@@ -113,6 +113,11 @@ forced by evidence rather than by taste.
 | **Announcing an import** | **After the refresh, not before** | The panel said "5 roles, 2 degrees" while the list below still showed the old profile. A promise made ahead of the thing it promises. |
 | **Where roll-call logic lives** | **`src/fill/roll-call.ts`, with Chrome injected** | It was inside the background entrypoint, which nothing can import, so it had no tests — the same defect that hid Phase 2's bugs in `descriptor.ts` and `write.ts`. |
 
+| **Screening answers** | **A table you type into, never inferred** | `notice_period` and `how_did_you_hear` used to be refused outright, because "we hold no answer for these, and a plausible guess is the failure mode this whole design exists to avoid". That was right while there was nowhere to put an answer. There is now, and the guarantee is kept by a better route: they read from a separate map the CV parser cannot reach, so no future change to parsing can start answering a question about you by inference. |
+| **`preferred_name` is one of them** | **Never defaulted to the first name** | The obvious fix when the box came back empty. It is wrong: a "Preferred Name" field exists because the answer may differ from the legal one, and filling it from the legal name fails exactly the people the field is there for. |
+| **Salary stays out of the answers table** | **It is sensitive, and stays refused** | Asked for it to be stored and filled like the others. `salary_expected` is in the sensitive registry with its reason already written — "the first number spoken usually wins" — and storing it for autofill would undo that. What was fixed instead is the matcher, so the question now reads as *yours to answer* rather than as *not recognised*. |
+| **Notice before employer** | **Narrow questions before broad ones, in `LABEL_RULES` too** | `sensitive-match.ts` already stated that convention; this list did not follow it, and a bare `\bemployer\b` matched "How much notice would you need to give your current employer" — writing the company name into the box asking when you can start. Ordering plus an explicit `not`, because ordering alone is one reshuffle away from the bug returning. |
+
 ## Still open
 
 One thing, and it is the only one that could still change the shape of the

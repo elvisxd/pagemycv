@@ -97,10 +97,10 @@ is exposed to dedicated workers alone, and a service worker cannot spawn one.
 **Working today**, because they are plain HTML with stable ids and publish
 open job APIs:
 
-`Lever` · `Greenhouse`
+`Lever` · `Greenhouse` · `Ashby`
 
-The extension runs on `jobs.lever.co`, `boards.greenhouse.io` and
-`job-boards.greenhouse.io`, and nowhere else. There are no host permissions:
+The extension runs on `jobs.lever.co`, `boards.greenhouse.io`,
+`job-boards.greenhouse.io` and `jobs.ashbyhq.com`, and nowhere else. There are no host permissions:
 the content script's own match list is the entire grant, so the extension
 cannot read the address of a tab it is not running in.
 
@@ -112,9 +112,18 @@ extension cannot reach it, which
 asserting. No permission over the company's domain is requested, at runtime or
 otherwise.
 
-Ashby moved out of the first batch. It renders inside its own iframe, which
-makes it the same problem as an embedded Greenhouse form on a company's
-careers page — Phase 3, not Phase 2.
+Ashby was deferred out of the first batch because it renders inside its own
+iframe — the same problem as an embedded Greenhouse form, which Phase 3
+solved. It is supported now, and the form that brought it in also exposed
+two bugs in the other two boards.
+
+**The questions a CV cannot answer.** A real application asks things no CV
+holds: how much notice you owe, whether you will travel, what clearance you
+hold. Those have a box in the panel, are stored encrypted, and are written
+only into a field that asks for that exact thing. They are never inferred —
+including your preferred name, which is left blank unless you set it,
+because a preferred-name field exists precisely because the answer may
+differ from the legal one.
 
 Then, as its own phase, because it is a shadow-heavy single-page app with a bot
 honeypot, a click-intercepting overlay and a wizard whose length changes per

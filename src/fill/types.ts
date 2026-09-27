@@ -29,7 +29,44 @@ export type FieldKind =
   | 'education_degree'
   | 'education_field'
   | 'notice_period'
-  | 'how_did_you_hear';
+  | 'how_did_you_hear'
+  // A single box for the whole place, which Ashby uses where Lever and
+  // Greenhouse ask for city and region separately.
+  | 'location'
+  // The screening questions. Nothing in a CV answers these; they are filled
+  // only from an answer you typed yourself. See SCREENING_KINDS.
+  | 'travel_ok'
+  | 'relocation_ok'
+  | 'security_clearance';
+
+/**
+ * Kinds whose value can ONLY come from an answer you gave, never from the CV
+ * and never from inference.
+ *
+ * `plan.ts` used to refuse `notice_period` and `how_did_you_hear` outright,
+ * with the note "we hold no answer for these, and a plausible guess is the
+ * failure mode this whole design exists to avoid". That was right while
+ * there was nowhere to put an answer. There is now, and the rule that
+ * replaces it keeps the same guarantee: these fill from the screening table
+ * or they do not fill at all.
+ */
+export const SCREENING_KINDS: readonly FieldKind[] = [
+  // Yes, an identity field, and it belongs here for the same reason as the
+  // rest: no CV holds it and it must never be inferred. Defaulting a
+  // preferred name to the legal first name would be wrong precisely for the
+  // people the field exists to serve — someone who goes by a different name
+  // would have their legal one typed into the box that asks them not to.
+  'preferred_name',
+  'notice_period',
+  'how_did_you_hear',
+  'travel_ok',
+  'relocation_ok',
+  'security_clearance',
+];
+
+export function isScreeningKind(kind: FieldKind): boolean {
+  return (SCREENING_KINDS as readonly string[]).includes(kind);
+}
 
 /** Which of the four passes resolved a field. Recorded, shown, and stored. */
 export type MatchStrategy = 'autocomplete' | 'chromium' | 'ats' | 'label' | 'sensitive';
@@ -132,8 +169,19 @@ export type SkipReason =
   | 'unrecognised'
   | 'unsupported'
   | 'never-auto'
+  /**
+   * A screening question you have not answered yet.
+   *
+   * Its own reason rather than 'no-value', because this one is actionable:
+   * there is a box in the panel where the answer goes, and saying "nothing
+   * stored" would hide that from the person who could fix it in ten seconds.
+   */
+  | 'unanswered'
   | 'no-value'
   | 'already-filled';
+
+/** Your own answers to the screening questions, keyed by kind. */
+export type ScreeningAnswers = Partial<Record<FieldKind, string>>;
 
 /** One decided field: a write, a file attachment, or a refusal that says why. */
 export type PlannedField =

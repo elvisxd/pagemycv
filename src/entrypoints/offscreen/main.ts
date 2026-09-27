@@ -103,6 +103,8 @@ function call<T>(cmd: string, payload?: Record<string, string>): Promise<T> {
  * the layer. The Record makes leaving one out a type error.
  */
 const COMMANDS: Record<keyof DbProtocol, string> = {
+  'db:screeningAnswers': 'screeningAnswers',
+  'db:setScreeningAnswer': 'setScreeningAnswer',
   'db:state': 'state',
   'db:create': 'create',
   'db:unlock': 'unlock',

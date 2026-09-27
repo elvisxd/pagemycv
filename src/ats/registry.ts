@@ -7,7 +7,7 @@
 // field on its own that the other passes could not reach.
 import type { FieldKind } from '../fill/types';
 
-export type AtsId = 'lever' | 'greenhouse' | 'unknown';
+export type AtsId = 'lever' | 'greenhouse' | 'ashby' | 'unknown';
 
 export interface AtsDefinition {
   id: AtsId;
@@ -64,7 +64,28 @@ const GREENHOUSE: AtsDefinition = {
   },
 };
 
-export const ATS_DEFINITIONS: readonly AtsDefinition[] = [LEVER, GREENHOUSE];
+const ASHBY: AtsDefinition = {
+  id: 'ashby',
+  label: 'Ashby',
+  // One host for every company: jobs.ashbyhq.com/{company}/{jobId}/application.
+  // Ashby also embeds itself in company careers pages, which Phase 3 already
+  // handles — the embed's origin is this one, and that is the whole grant.
+  hosts: ['jobs.ashbyhq.com'],
+  // Deliberately thin. Ashby renders a React form whose `name` attributes are
+  // generated per job rather than fixed the way Lever's and Greenhouse's are,
+  // so a map keyed on them would be a hypothesis with a short shelf life.
+  // What IS stable is the visible label — "Preferred Full Name", "Legal Full
+  // Name" — and the label heuristics read exactly that. The few entries here
+  // are the ones seen in page source; the rest is carried by passes 1 and 4.
+  fields: {
+    _systemfield_name: 'full_name',
+    _systemfield_email: 'email',
+    _systemfield_phone: 'phone',
+    _systemfield_resume: 'resume_file',
+  },
+};
+
+export const ATS_DEFINITIONS: readonly AtsDefinition[] = [LEVER, GREENHOUSE, ASHBY];
 
 const UNKNOWN: AtsDefinition = {
   id: 'unknown',
