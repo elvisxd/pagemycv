@@ -9,12 +9,10 @@ import type { FillReport, ScreeningAnswers } from '../fill/types';
 
 export interface VaultProtocol {
   'vault:state'(): VaultState;
-  'vault:create'(data: { passphrase: string }): VaultState;
-  'vault:unlock'(data: { passphrase: string }): VaultState;
-  'vault:lock'(): VaultState;
+  /** One time, for a vault that predates the stored key. */
+  'vault:convert'(data: { passphrase: string }): VaultState;
   'vault:profile'(): ProfileView;
   'vault:importCv'(data: { markdown: string }): { imported: true; counts: Record<string, number> };
-  'vault:touch'(): VaultState;
   'vault:resumeMeta'(): ResumeMeta | null;
   'vault:screeningAnswers'(): ScreeningAnswers;
   'vault:setScreeningAnswer'(data: { kind: string; answer: string }): { saved: true };

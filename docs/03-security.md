@@ -31,8 +31,8 @@ Ordered by how likely each one is to actually happen to you.
 | 2 | **A honeypot flags your application as a bot** | High if unmitigated | Hard denylist plus real visibility computation. See below. |
 | 3 | **A sensitive value gets typed into a form you did not intend** | Medium | Sensitive field class. Never auto-filled, always per-field confirmation. |
 | 4 | **Indirect prompt injection from the job posting** | Medium | The page supplies values, never instructions. Byte returns a flat value map. |
-| 5 | **Another extension reads the vault** | Low | Extension storage is origin-isolated. Sensitive columns encrypted at rest with a key never written to disk. |
-| 6 | **Your machine is stolen or the profile is copied** | Low | Same as above. The vault is useless without the passphrase. |
+| 5 | **Another extension reads the vault** | Low | Extension storage is origin-isolated. Sensitive columns encrypted at rest. |
+| 6 | **Your machine is stolen or the profile is copied** | Low | **Not mitigated.** There is no passphrase, so the key is in the profile next to the data. See "What dropping the passphrase cost". |
 | 7 | **A site's terms get your account restricted** | Medium on LinkedIn and Indeed, low elsewhere | Those two are out of scope entirely. |
 | 8 | **A supply-chain compromise in a dependency** | Low but severe | Minimal dependency surface, pinned lockfile, no dynamic imports, CSP forbids remote script. |
 
@@ -243,14 +243,14 @@ want to search your own application history without unlocking the vault.
 | | |
 |---|---|
 | Cipher | AES-GCM, 256-bit, via WebCrypto |
-| Key derivation | **Argon2id**, `m = 19 MiB`, `t = 2`, `p = 1`, the current OWASP configuration, asserted against literals |
+| Key source | 32 bytes from `crypto.getRandomValues`. No passphrase, so nothing to stretch. |
+| Key derivation | **Argon2id**, `m = 19 MiB`, `t = 2`, `p = 1`, the current OWASP configuration, asserted against literals. Used ONLY to convert a vault created before the passphrase was dropped. |
 | Passphrase encoding | Normalized to NFC before derivation |
 | Argon2 implementation | `hash-wasm`, about 11 KB gzipped. `@openpgp/argon2id` is not published to npm. |
-| Key storage | **Never.** Derived with `extractable: false`, held in the offscreen document for the session. |
+| Key storage | `chrome.storage.local`, written by `src/vault/key-store.ts` and nowhere else. Imported with `extractable: false`. |
 | IV | 12 random bytes per value, stored alongside the ciphertext |
 | Additional authenticated data | `JSON.stringify([rowId, column, schemaVersion, padded])`, tested |
-| Auto-lock | 15 minutes idle |
-| Minimum passphrase | 12 characters, enforced in the worker, not only the panel |
+| Auto-lock | **None.** With the key on disk, locking and silently reopening would be theatre. |
 
 ### Why Argon2id and not PBKDF2
 
@@ -317,9 +317,9 @@ Pad every sensitive column to a fixed block before encrypting.
 tilde, and composed on Linux and Windows. Those are different byte sequences, so
 Argon2id derives different keys from what the user believes is one passphrase.
 The vault would open on the machine that created it and report **wrong
-passphrase** everywhere else, with no recovery, because the key is never stored.
+passphrase** everywhere else, with no recovery.
 
-`deriveKey` normalizes to NFC, and `passphraseProblem` measures the same form,
+`deriveKeyMaterial` normalizes to NFC,
 so the length rule and the derivation can never disagree about what the
 passphrase is.
 
@@ -347,15 +347,39 @@ is fully synchronous.
 reach the file. For a vault, a commit that reports success and then disappears
 is the worst available failure.
 
-### The key never gets persisted, including as a CryptoKey
+### What dropping the passphrase cost
 
-A non-extractable `CryptoKey` can be stored in IndexedDB and never handed back as
-bytes. That is a real pattern, and it is **the wrong pattern here**: a persisted
-key survives restarts, so anyone with the browser profile directory could decrypt
-the CV without ever knowing the passphrase. It would nullify the entire scheme.
+This section used to say the key is never persisted, and that a persisted key
+would "nullify the entire scheme". That was correct, and the passphrase was
+dropped anyway, because it was asked for and because the person asking is the
+only user. The honest accounting:
 
-Derive per session. Hold it in the offscreen document, which is where the
-database already lives and which outlives the service worker.
+**What was lost.** Threat 6. Anyone with the profile directory has both the
+ciphertext and the key, so the vault is readable. There is no secret the
+machine does not also have — that is not a weakness in how the key is stored,
+it is what "no passphrase" means. No storage choice recovers it.
+
+**What is left, and it is not nothing.** The key lives in
+`chrome.storage.local` and the data in OPFS: two different stores. A copy of
+the database file alone is useless, which covers the realistic accidents —
+a stray backup, a file pulled out to inspect, a sync folder. Origin isolation
+against other extensions is unchanged. Every column keeps its AAD binding, so
+a ciphertext still cannot be relocated between rows.
+
+**What would bring threat 6 back.** A passphrase, or a passkey with the
+WebAuthn PRF extension, or an OS keychain. All three were on the table; the
+first was removed on request and the other two are unbuilt. Nothing about
+this design blocks them: the key store is one module with three functions, and
+the conversion path proves a vault can change where its key comes from without
+re-encrypting a byte.
+
+The vault key is held by the **service worker**, which reads it from storage,
+and by the **dedicated worker**, which uses it. It is not held by the offscreen
+document in between, which only relays. That split is not a preference: of the
+three contexts, the service worker is the only one with `chrome.storage` at
+all — `chrome` is undefined inside a dedicated worker, and an offscreen
+document is given `chrome.runtime` and nothing else. Both measured (see
+`spikes/phase-5`, and the gate, which caught the second one).
 
 `chrome.storage.session` was the obvious candidate: held in memory, never
 written to disk. **It was tested and it does not work.** It accepts a

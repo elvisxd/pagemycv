@@ -1,0 +1,13 @@
+{
+  "question": "does a dedicated worker spawned from an offscreen document have chrome.storage.local?",
+  "answer": {
+    "roundTrip": "threw: chrome is not defined",
+    "seen": {
+      "chrome": "undefined",
+      "local": "n/a",
+      "storage": "no chrome"
+    }
+  },
+  "read back from the service worker: what the dedicated worker wrote": null,
+  "consequence": "the worker cannot persist the key itself; whatever owns key material at rest has to be a document"
+}

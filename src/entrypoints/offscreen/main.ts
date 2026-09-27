@@ -4,9 +4,20 @@
 //
 // It also outlives the service worker, which is terminated after 30 seconds of
 // idle. That is why the vault key lives down here rather than up there.
+//
+// Since the passphrase went away it has a second job: OPENING the vault. The
+// worker cannot do that itself — `chrome` is undefined inside a dedicated
+// worker, measured rather than assumed (spikes/phase-5) — so the key material
+// is loaded here and handed down. Everything below the relay exists to make
+// sure that has happened before any command that needs the key runs.
 
+import type { VaultState } from '../../db/schema';
 import type { DbProtocol } from '../../messaging/db';
 import { onDb } from '../../messaging/db';
+import { fromBase64, toBase64 } from '../../util/base64';
+import { convertVault } from '../../vault/convert';
+import { deriveKeyMaterial, newKeyMaterial } from '../../vault/crypto';
+import { loadKeyMaterial, saveKeyMaterial } from '../../vault/key-store';
 
 /**
  * How long a single database command may take before the caller gives up.
@@ -101,17 +112,20 @@ function call<T>(cmd: string, payload?: Record<string, string>): Promise<T> {
  * missing one compiled cleanly and failed at runtime as "the message port
  * closed before a response was received", which names neither the message nor
  * the layer. The Record makes leaving one out a type error.
+ *
+ * 'db:ping' is excluded by name rather than forgotten: it is answered here,
+ * below, and relaying it to the worker would make it mean something else.
  */
-const COMMANDS: Record<keyof DbProtocol, string> = {
+const COMMANDS: Record<Exclude<keyof DbProtocol, 'db:ping'>, string> = {
   'db:screeningAnswers': 'screeningAnswers',
   'db:setScreeningAnswer': 'setScreeningAnswer',
   'db:state': 'state',
   'db:create': 'create',
-  'db:unlock': 'unlock',
-  'db:lock': 'lock',
+  'db:open': 'open',
+  'db:salt': 'salt',
+  'db:markConverted': 'markConverted',
   'db:profile': 'profile',
   'db:importCv': 'importCv',
-  'db:touch': 'touch',
   'db:fillValues': 'fillValues',
   'db:setResume': 'setResume',
   'db:resumeMeta': 'resumeMeta',
@@ -123,3 +137,8 @@ for (const [key, cmd] of Object.entries(COMMANDS) as [keyof DbProtocol, string][
   // get wrong here.
   onDb(key, ({ data }) => call(cmd, data as Record<string, string> | undefined));
 }
+
+// Registered LAST, on purpose. A ping that answered before the commands were
+// registered would report a document that cannot yet be asked anything, which
+// is the exact race it exists to close.
+onDb('db:ping', () => ({ ready: true }) as const);

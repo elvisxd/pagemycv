@@ -18,8 +18,10 @@ CV on Google's servers, which is exactly what this project exists to avoid.
 
 ## Conventions
 
-- A column ending in `_enc` holds an AES-GCM ciphertext blob. Never readable
-  without the passphrase. Every one is encrypted with
+- A column ending in `_enc` holds an AES-GCM ciphertext blob, unreadable
+  without the vault key, which lives in `chrome.storage.local` rather than in
+  this file. See `03-security.md` for what that does and does not buy. Every
+  one is encrypted with
   `additionalData = rowId + "." + columnName + "." + schemaVersion`, so a
   ciphertext cannot be moved between rows or columns. See `03-security.md`.
 - Low-entropy sensitive columns are padded to a fixed block before encryption,
@@ -248,7 +250,12 @@ tied to one browser profile on one machine, and losing it means retyping your
 entire history.
 
 - **Export** writes a single file containing the ciphertext columns as they are,
-  plus the vault's salt and parameters. The passphrase is still required to read
-  it. Exporting is logged to `event_log`.
-- **Import** into a fresh install restores everything with the same passphrase.
+  plus the vault's salt and parameters. Unbuilt, and the passphrase going away
+  changes its shape: ciphertext alone is no longer portable, because the key it
+  needs is not in the database. An export has to either carry the key — making
+  the file readable by anyone holding it, which should be said out loud rather
+  than implied — or ask for a passphrase at export time, used for that file and
+  nothing else. The second is the better design and is the one to build.
+- **Import** into a fresh install restores everything, and has to install the
+  key as well as the rows.
 - The export is never uploaded anywhere by the extension. You move the file.

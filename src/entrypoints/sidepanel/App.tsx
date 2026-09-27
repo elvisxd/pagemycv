@@ -178,7 +178,7 @@ export function App() {
   // is what a keyboard or screen reader user wants, and doing it here makes
   // that a decision rather than a default.
   useEffect(() => {
-    if (vault && vault.status !== 'unlocked') passphraseRef.current?.focus();
+    if (vault?.status === 'needs_passphrase') passphraseRef.current?.focus();
   }, [vault]);
 
   // Opening the import view unmounts the button that opened it, so focus falls
@@ -198,57 +198,17 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [showImport]);
 
-  // Keeps the auto-lock honest: the panel being open is not activity, but
-  // using it is. Polls so an expiry is reflected without a reload.
-  //
-  // It reports a LOCK and nothing else, and it bumps the request counter only
-  // when it has one to report. The earlier version invalidated every refresh
-  // in flight on each tick, including the one loading the profile right after
-  // an import, and the panel then rendered an unlocked vault with no CV and
-  // offered to import over the one just stored. That is the same failure the
-  // atomic transition fixed, arriving from the other side; adding a second
-  // await to refresh() widened the window enough for the gate to catch it.
-  useEffect(() => {
-    const timer = setInterval(() => {
-      sendVault('vault:state', undefined)
-        .then((s) => {
-          if (s.status === 'unlocked') return;
-          request.current++;
-          setVault(s);
-          setProfile(null);
-          // A locked vault must not leave a filled-form report on screen
-          // listing what was written from it.
-          setReport(null);
-          setResume(null);
-        })
-        .catch(() => {});
-    }, 30_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const submit = async (kind: 'create' | 'unlock') => {
+  const convert = async () => {
     setBusy(true);
     setError(null);
     try {
-      await sendVault(kind === 'create' ? 'vault:create' : 'vault:unlock', { passphrase });
+      await sendVault('vault:convert', { passphrase });
       setPassphrase('');
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
-    }
-  };
-
-  const lock = async () => {
-    setError(null);
-    try {
-      await sendVault('vault:lock', undefined);
-      await refresh();
-    } catch (e) {
-      // Silence here would leave the panel showing an unlocked vault while the
-      // user believes they locked it.
-      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -352,28 +312,26 @@ export function App() {
     );
   }
 
-  if (vault.status !== 'unlocked') {
-    const creating = vault.status === 'absent';
+  // The ONLY screen left that asks for anything, and only for vaults made
+  // before the passphrase was dropped. A new vault never reaches it.
+  if (vault.status === 'needs_passphrase') {
     return (
       <Screen>
         <Heading>PageMyCV</Heading>
-        {/* Nothing on the create screen. Elvis asked for the explanation to
-            go, and it was doing two jobs badly: teaching the key-derivation
-            model to somebody who has not asked, and burying the one fact
-            that matters — a forgotten passphrase is a lost CV. The worker
-            still refuses a short one and says why, so the length rule
-            arrives when it is relevant rather than as a preamble. */}
-        {creating ? null : <Muted>Locked. Your CV stays encrypted until you unlock it.</Muted>}
+        <Muted>
+          This vault was made with a passphrase. Enter it once and PageMyCV will open by itself from
+          now on.
+        </Muted>
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (passphrase) submit(creating ? 'create' : 'unlock');
+            if (passphrase) convert();
           }}
         >
           <input
             type="password"
             ref={passphraseRef}
-            autocomplete={creating ? 'new-password' : 'current-password'}
+            autocomplete="current-password"
             value={passphrase}
             placeholder="Passphrase"
             aria-label="Passphrase"
@@ -390,12 +348,8 @@ export function App() {
             }}
           />
           <div style={{ marginTop: 10 }}>
-            {/* Not disabled on a short passphrase. A disabled submit button
-                also suppresses Enter, so the rule became unexplainable: the
-                button did nothing and said nothing. Let the submit through and
-                let the worker, which is the authority, say why it refused. */}
             <Button type="submit" disabled={busy || !passphrase}>
-              {busy ? 'Working…' : creating ? 'Create the vault' : 'Unlock'}
+              {busy ? 'Working…' : 'Open it'}
             </Button>
           </div>
         </form>
@@ -404,17 +358,24 @@ export function App() {
     );
   }
 
+  if (vault.status !== 'unlocked') {
+    // 'absent' and 'opening' are both transient: the offscreen document
+    // creates or opens the vault before any command returns, so this is what
+    // the first frame looks like, not a state anybody sits in.
+    return (
+      <Screen>
+        <Heading>PageMyCV</Heading>
+        <Muted>Opening…</Muted>
+      </Screen>
+    );
+  }
+
   const p = profile;
   return (
     <Screen>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <Heading>
-          {p?.profile ? `${p.profile.legalFirst} ${p.profile.legalLast}` : 'PageMyCV'}
-        </Heading>
-        <Button variant="quiet" onClick={lock}>
-          Lock
-        </Button>
-      </div>
+      <Heading>
+        {p?.profile ? `${p.profile.legalFirst} ${p.profile.legalLast}` : 'PageMyCV'}
+      </Heading>
       {p?.profile?.headline ? <Muted>{p.profile.headline}</Muted> : null}
 
       {showImport ? (

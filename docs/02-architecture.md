@@ -57,10 +57,25 @@ unnecessary.
   owns no state                  one per extension               offscreen page
   routes messages   ─────────▶   spawns the worker   ─────────▶  sqlite-wasm
   ensureOffscreen()              relays messages                 VFS: opfs-sahpool
-  on every handler                                               the only context
-                                                                 where the sync
-                                                                 file API exists
+  on every handler               NOTHING ELSE                    the only context
+  opens the vault                                                where the sync
+  chrome.storage ✓               chrome.runtime ONLY             file API exists
+                                                                 no chrome at all
 ```
+
+The bottom row is why the vault is opened by the service worker rather than
+next to the database. The key has to be read from `chrome.storage`, and of the
+three contexts only one can:
+
+| Context | `chrome.storage` | How we know |
+|---|---|---|
+| service worker | yes | it is an ordinary extension context |
+| offscreen document | **no** — `chrome.runtime` and nothing else | the gate, after the first attempt put the key store here and every open failed with `Cannot read properties of undefined` |
+| dedicated worker | **no** — `chrome` is undefined | `spikes/phase-5`, measured in a real browser before the design was written |
+
+So the key travels service worker → offscreen → dedicated worker as an
+ordinary base64 payload. The offscreen document is a pipe for it and never
+holds it.
 
 The service worker must call `ensureOffscreenDocument()` at the top of **every**
 event handler. It gets killed and revived constantly while the offscreen

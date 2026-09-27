@@ -6,10 +6,11 @@
 //   1. Every encryption is bound to its position with AAD. Without it, all
 //      columns share one key, so any ciphertext decrypts in any column and an
 //      attacker with file access can relocate a visa status into another row.
-//   2. The key is never persisted. Not to disk, not to chrome.storage, not as
-//      a non-extractable CryptoKey in IndexedDB. A persisted key survives a
-//      restart, which would let anyone with the browser profile read the CV
-//      without ever knowing the passphrase.
+//   2. Raw key material leaves this module in exactly one direction: out of
+//      newKeyMaterial and deriveKeyMaterial, into the one module allowed to
+//      persist it. It is never read back out of a CryptoKey — importKey is
+//      called with extractable: false and exportKey is banned by the guard —
+//      so a key in use cannot be turned back into bytes by any caller.
 import { argon2id } from 'hash-wasm';
 
 /** Bumped only when the meaning of a stored column changes. Part of the AAD. */
@@ -25,25 +26,8 @@ const SALT_BYTES = 16;
 /** Low-entropy values are padded so ciphertext length stops revealing them. */
 export const PAD_BLOCK = 64;
 
-/**
- * The shortest passphrase the vault will accept.
- *
- * Argon2id buys roughly three orders of magnitude against a GPU, which is a
- * great deal and still nothing against a four character passphrase: the whole
- * space is searched regardless of how slow each guess is. Twelve is the length
- * at which a memorable phrase of three or four words starts to be plausible,
- * and it is what the lock screen asks for.
- */
-export const MIN_PASSPHRASE = 12;
-
-export function passphraseProblem(passphrase: string): string | null {
-  // Measured on the same normalized form the key is derived from, so the rule
-  // and the derivation never disagree about what the passphrase is.
-  if (passphrase.normalize('NFC').length < MIN_PASSPHRASE) {
-    return `the passphrase needs at least ${MIN_PASSPHRASE} characters`;
-  }
-  return null;
-}
+/** AES-256. The length of the key the vault is encrypted with. */
+export const KEY_BYTES = 32;
 
 const enc = new TextEncoder();
 
@@ -56,7 +40,47 @@ export function randomSalt(): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(SALT_BYTES));
 }
 
-export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+/**
+ * A fresh vault key, from the CSPRNG rather than from anything a person typed.
+ *
+ * There is no passphrase, so there is no low-entropy input to stretch and
+ * nothing for Argon2id to do: 32 random bytes are already beyond brute force.
+ * What replaces the passphrase is not a weaker secret, it is no secret at all
+ * — see docs/03-security.md for what that costs and what it still buys.
+ */
+export function newKeyMaterial(): Uint8Array<ArrayBuffer> {
+  return crypto.getRandomValues(new Uint8Array(KEY_BYTES));
+}
+
+/**
+ * Turn stored bytes into the key the vault is read and written with.
+ *
+ * `async` so the length check REJECTS rather than throwing synchronously. A
+ * Promise-returning function that throws before it returns one escapes every
+ * .catch() its caller wrote, which here would take down the offscreen
+ * document's open instead of reporting a corrupt stored key.
+ */
+export async function importKeyMaterial(material: Uint8Array): Promise<CryptoKey> {
+  if (material.length !== KEY_BYTES) {
+    throw new Error(`the vault key must be ${KEY_BYTES} bytes, got ${material.length}`);
+  }
+  // extractable: false. It is obfuscation rather than a boundary, but it stops
+  // the raw bytes ever reaching a log or a serialized state object by accident.
+  return crypto.subtle.importKey('raw', own(material), 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+/**
+ * The key material an existing passphrase vault is already encrypted under.
+ *
+ * Only the one-time conversion calls this. It returns bytes rather than a
+ * CryptoKey precisely because those bytes have to be stored: converting by
+ * re-encrypting every column under a new key would be a migration that can
+ * half-finish, and this cannot — the same key keeps working either way.
+ */
+export async function deriveKeyMaterial(
+  passphrase: string,
+  salt: Uint8Array,
+): Promise<Uint8Array<ArrayBuffer>> {
   const raw = await argon2id({
     // Normalize first. "contraseña" typed on macOS often arrives decomposed
     // (n + combining tilde) and on Linux or Windows composed (ñ). Those are
@@ -69,12 +93,7 @@ export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<C
     ...KDF,
     outputType: 'binary',
   });
-  // extractable: false. It is obfuscation rather than a boundary, but it stops
-  // the raw bytes ever reaching a log or a serialized state object by accident.
-  return crypto.subtle.importKey('raw', own(raw as Uint8Array), 'AES-GCM', false, [
-    'encrypt',
-    'decrypt',
-  ]);
+  return own(raw as Uint8Array);
 }
 
 /**

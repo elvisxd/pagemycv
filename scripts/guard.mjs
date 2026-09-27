@@ -232,11 +232,15 @@ forbid(/crypto\s*\??\.\s*subtle|\bsubtle\b\s*\./, 'crypto.subtle outside the one
   'src/vault/crypto.ts',
 ]);
 forbid(/sqlite3InitModule|OpfsSAHPoolDb/, 'SQLite outside the one door', ['src/db/worker.ts']);
-// The key is matched by what it IS, not by what it is called.
+// The vault key is on disk now: there is no passphrase, so something has to
+// hold it. What this still enforces is that ONE module does. The rule used to
+// be "never persisted" and the allowlist was the worker, which turned out to
+// be the one context that cannot persist anything — `chrome` is undefined in a
+// dedicated worker (spikes/phase-5).
 forbid(
   /storage\.(local|session|managed)\.set|indexedDB\.|\bcaches\b\./,
-  'persistent storage: the vault key must never reach it',
-  ['src/db/worker.ts'],
+  'persistent storage: only the key store may write the vault key',
+  ['src/vault/key-store.ts'],
 );
 forbid(/exportKey|extractable\s*:\s*true/, 'an extractable key');
 
@@ -277,7 +281,7 @@ for (const b of BANNED) {
 }
 
 // ── The manifest ────────────────────────────────────────────────────────────
-const ALLOWED_PERMISSIONS = ['offscreen', 'unlimitedStorage', 'sidePanel'];
+const ALLOWED_PERMISSIONS = ['offscreen', 'unlimitedStorage', 'sidePanel', 'storage'];
 const configPath = 'wxt.config.ts';
 const config = readFileSync(join(ROOT, configPath), 'utf8');
 
@@ -358,7 +362,7 @@ const ENFORCED = [
   'invariant 3, page content never becomes an instruction',
   'invariant 4, both honeypot layers exist and the planner calls them',
   'invariant 5, one network door',
-  'the vault key never reaches persistent storage',
+  'the vault key reaches persistent storage through one module and no other',
   'one door each to crypto.subtle, to SQLite and to writing the page',
   'the writer re-checks the element before it writes',
   'no telemetry, direct or transitive',

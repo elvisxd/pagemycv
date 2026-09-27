@@ -1,12 +1,21 @@
 // The service worker owns no state. It is terminated after 30 seconds of idle
-// and every global goes with it, so it does exactly two things: make sure the
-// offscreen document exists, and pass messages through to it.
+// and every global goes with it, so it does exactly three things: make sure
+// the offscreen document exists, OPEN the vault, and pass messages through.
 //
 // It cannot host the database. Inside this context the Worker constructor and
 // FileSystemFileHandle.createSyncAccessHandle are both absent, verified in a
 // real browser, see spikes/phase-0.
+//
+// Opening the vault landed here by elimination, and the elimination is the
+// interesting part. The key has to be read from chrome.storage, and of the
+// three contexts only this one can: `chrome` is undefined inside a dedicated
+// worker, and an offscreen document is given chrome.runtime and nothing else.
+// Both measured in a real browser rather than assumed — the second by the
+// gate, after the first design put the key store in the offscreen document
+// and every open failed with "Cannot read properties of undefined".
 import { defineBackground } from 'wxt/utils/define-background';
 import { atsForUrl } from '../ats/registry';
+import type { VaultState } from '../db/schema';
 import { classify } from '../fill/detect';
 import type { FrameChoice, FrameReport } from '../fill/frames';
 import { chooseFrame, describeFrame } from '../fill/frames';
@@ -18,10 +27,52 @@ import { sendDb } from '../messaging/db';
 import { onFill, sendFill } from '../messaging/fill';
 import type { VaultProtocol } from '../messaging/vault';
 import { onVault } from '../messaging/vault';
+import { fromBase64, toBase64 } from '../util/base64';
+import { convertVault } from '../vault/convert';
+import { deriveKeyMaterial, newKeyMaterial } from '../vault/crypto';
+import { loadKeyMaterial, saveKeyMaterial } from '../vault/key-store';
 
 const OFFSCREEN_PATH = 'offscreen.html';
 
+/**
+ * How long to keep pinging a freshly created offscreen document.
+ *
+ * It is a local document with one script; this is generous. What it is NOT is
+ * a retry budget for a broken document — only "no listener yet" is retried,
+ * and any other failure comes straight back.
+ */
+const OFFSCREEN_READY_MS = 5000;
+const OFFSCREEN_POLL_MS = 25;
+
 let creating: Promise<void> | null = null;
+
+/**
+ * Wait until the offscreen document ANSWERS, not until it exists.
+ *
+ * chrome.offscreen.createDocument resolves when the document has been
+ * created, which is earlier than when its scripts have run and registered
+ * their listeners. Anything sent in that window comes back "Could not
+ * establish connection. Receiving end does not exist." — a race reported as
+ * a failure, and the panel renders it as "The vault could not be opened",
+ * which sounds like the CV is gone.
+ *
+ * The hazard predates this: hasDocument() has the same gap, and the comment
+ * below has described it all along. It only became visible when opening the
+ * vault moved here, because that turned one relayed message into a sequence
+ * where losing the first one aborts the rest.
+ */
+async function waitForOffscreen(): Promise<void> {
+  const deadline = Date.now() + OFFSCREEN_READY_MS;
+  for (;;) {
+    try {
+      await sendDb('db:ping', undefined);
+      return;
+    } catch (err) {
+      if (!isNoListener(err) || Date.now() >= deadline) throw err;
+      await new Promise((resolve) => setTimeout(resolve, OFFSCREEN_POLL_MS));
+    }
+  }
+}
 
 async function ensureOffscreen(): Promise<void> {
   // `creating` is consulted FIRST. hasDocument() returns true for a document
@@ -29,7 +80,10 @@ async function ensureOffscreen(): Promise<void> {
   // second message skip the wait and send into a document with no listeners,
   // which rejects with "Could not establish connection".
   if (creating) return creating;
-  if (await chrome.offscreen.hasDocument()) return;
+  // hasDocument() is true for a document whose scripts have not run, so a
+  // service worker that was restarted next to a live document still has to
+  // wait for an answer rather than assume one.
+  if (await chrome.offscreen.hasDocument()) return waitForOffscreen();
   creating = chrome.offscreen
     .createDocument({
       url: OFFSCREEN_PATH,
@@ -43,6 +97,7 @@ async function ensureOffscreen(): Promise<void> {
       if (await chrome.offscreen.hasDocument()) return;
       throw err;
     })
+    .then(waitForOffscreen)
     .finally(() => {
       creating = null;
     });
@@ -248,14 +303,82 @@ async function fillActiveTab(): Promise<FillReport> {
   return { ...report, frameNote: describeFrame(choice) };
 }
 
+/**
+ * The open, in flight or done.
+ *
+ * Memoized because it WRITES. Two panels opening at once would otherwise both
+ * see an absent vault and both create one, and the second would win with a
+ * key the first one's rows are not encrypted under. The gate opens four at
+ * once for exactly this reason.
+ *
+ * Not cached across a service worker restart, which is correct rather than
+ * merely tolerable: a new service worker cannot know whether the offscreen
+ * document it is talking to still holds the key, so it asks again. Opening an
+ * already-open vault is a state() call and nothing else.
+ */
+let opening: Promise<void> | null = null;
+
+async function openVault(): Promise<void> {
+  const state = await sendDb('db:state', undefined);
+  if (state.status === 'unavailable' || state.status === 'unlocked') return;
+
+  if (state.status === 'absent') {
+    // Generated here, where it can be stored, and STORED BEFORE the vault is
+    // created. A key the worker encrypted a vault under and we then failed to
+    // persist would leave that vault unopenable forever; a stored key with no
+    // vault behind it is just an unused value the next create overwrites.
+    const material = newKeyMaterial();
+    await saveKeyMaterial(material);
+    await sendDb('db:create', { material: toBase64(material) });
+    return;
+  }
+
+  // Made with a passphrase and not yet converted. The panel asks once; there
+  // is nothing this can do without it.
+  if (state.status === 'needs_passphrase') return;
+
+  const material = await loadKeyMaterial();
+  if (!material) {
+    // The vault says it needs no passphrase and its key is not here. Saying
+    // so is the only honest answer: creating a new one would write over a CV
+    // that is still on disk, and reporting "locked" would ask for a
+    // passphrase that was never set.
+    throw new Error(
+      'the vault exists but its key is not in this browser profile, so it cannot be opened',
+    );
+  }
+  await sendDb('db:open', { material: toBase64(material) });
+}
+
+function ensureVaultOpen(): Promise<void> {
+  if (!opening) {
+    opening = openVault().catch((err) => {
+      // Never cache the failure. A worker that timed out mid-open would
+      // otherwise stay broken until this service worker is torn down, and the
+      // panel's "Try again" would be a button that cannot work.
+      opening = null;
+      throw err;
+    });
+  }
+  return opening;
+}
+
+/** The one-time move off a passphrase. The order is in src/vault/convert.ts. */
+function convert(passphrase: string): Promise<VaultState> {
+  return convertVault<VaultState>(passphrase, {
+    readSalt: async () => fromBase64(await sendDb('db:salt', undefined)),
+    derive: deriveKeyMaterial,
+    open: (material) => sendDb('db:open', { material: toBase64(material) }),
+    save: saveKeyMaterial,
+    markConverted: () => sendDb('db:markConverted', undefined),
+  });
+}
+
 const ROUTES: Record<keyof VaultProtocol, keyof DbProtocol | 'local'> = {
   'vault:state': 'db:state',
-  'vault:create': 'db:create',
-  'vault:unlock': 'db:unlock',
-  'vault:lock': 'db:lock',
+  'vault:convert': 'local',
   'vault:profile': 'db:profile',
   'vault:importCv': 'db:importCv',
-  'vault:touch': 'db:touch',
   'vault:resumeMeta': 'db:resumeMeta',
   'vault:setResume': 'db:setResume',
   'vault:screeningAnswers': 'db:screeningAnswers',
@@ -269,10 +392,29 @@ for (const [key, target] of Object.entries(ROUTES) as [
   keyof DbProtocol | 'local',
 ][]) {
   if (target === 'local') continue;
-  onVault(key, ({ data }) => withVault(() => sendDb(target, data as never) as Promise<never>));
+  onVault(key, ({ data }) =>
+    withVault(async () => {
+      // Before the command, not beside it. Every route below needs the key,
+      // and 'db:state' needs the open to have been ATTEMPTED or it reports a
+      // vault nobody has opened yet as if that were the final answer.
+      await ensureVaultOpen();
+      return sendDb(target, data as never) as Promise<never>;
+    }),
+  );
 }
 
-onVault('vault:fill', () => withVault(fillActiveTab));
+// Not routed: it is several worker calls plus a write to the key store, and
+// it must NOT wait on ensureVaultOpen — it is what makes the open possible.
+onVault('vault:convert', ({ data }) => withVault(() => convert(data.passphrase ?? '')));
+
+onVault('vault:fill', () =>
+  withVault(async () => {
+    // Routed messages get this from the loop above; these two are handled
+    // here, so they need it explicitly. Filling reads the vault.
+    await ensureVaultOpen();
+    return fillActiveTab();
+  }),
+);
 onVault('vault:clearFill', async () => {
   // Every frame that answered, not just the one that was filled: the service
   // worker may have been terminated since, and a highlight nobody can clear
