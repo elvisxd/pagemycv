@@ -118,9 +118,20 @@ function forbid(pattern, message, allow = []) {
 // ── Invariant 5: nothing leaves the machine except the configured Byte call ──
 // Every transport, not just fetch. An alias (`const f = globalThis.fetch`) still
 // slips through; that is why tests/e2e/gate.cjs watches real requests.
+//
+// `chrome.identity` is on this list because it was NOT, and the hole was
+// real: `chrome.identity.getAuthToken` talks to Google and is none of the
+// transports below, so a call to it passed the guard in any file. Invariant
+// 5 says nothing phones home, and it was being enforced as "none of these
+// six APIs" — which is a narrower claim wearing the same name. `downloads`
+// and `WebTransport` were missing for the same reason.
+//
+// A regex can never be complete, and pretending otherwise is how the next
+// hole gets in. What this list can promise is that every way out we know of
+// has to go through one named door.
 const NETWORK_DOOR = 'src/byte/client.ts';
 forbid(
-  /\bfetch\b|XMLHttpRequest|\bWebSocket\b|\bEventSource\b|sendBeacon|navigator\s*\??\.\s*sendBeacon|\bimportScripts\b|\bRTCPeerConnection\b/,
+  /\bfetch\b|XMLHttpRequest|\bWebSocket\b|\bWebTransport\b|\bEventSource\b|sendBeacon|navigator\s*\??\.\s*sendBeacon|\bimportScripts\b|\bRTCPeerConnection\b|chrome\s*\??\.\s*identity\b|chrome\s*\??\.\s*downloads\b/,
   'network transport outside the one door',
   [NETWORK_DOOR],
 );
