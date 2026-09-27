@@ -112,16 +112,37 @@ forced by evidence rather than by taste.
 | **Refusal messages** | **Two, not one** | "Not a board" and "a board with no form on this page" are different problems. The second is the commonest way a fill does not work — being on the job description — and one shared message sent people looking for a bug instead of clicking Apply. |
 | **Announcing an import** | **After the refresh, not before** | The panel said "5 roles, 2 degrees" while the list below still showed the old profile. A promise made ahead of the thing it promises. |
 | **Where roll-call logic lives** | **`src/fill/roll-call.ts`, with Chrome injected** | It was inside the background entrypoint, which nothing can import, so it had no tests — the same defect that hid Phase 2's bugs in `descriptor.ts` and `write.ts`. |
+| **One door into shadow roots** | **`src/fill/shadow.ts`, enforced by the guard** | A second caller is a second place that can forget the closed case, and the closed case fails silently: a flat query returns nothing, so the page reports as having no fields — which sounds like an answer rather than like a failure. |
+| **The Workday listbox selectors** | **Data on the ATS definition, not code** | Nobody has opened a real tenant. The mechanism — one synchronous pass to open, read and pick — is tested and is architectural, so it had to be settled now. The strings are a hypothesis and are kept where fixing them touches no logic. Writing them inline would have buried a guess inside something tested. |
+| **Events into a shadow root** | **`composed: true`, always** | Not a Workday special case. A bubbling event stops at any shadow boundary, so a document-level listener never hears the fill; the field looks filled and the form submits empty. The failure is silent in both directions, which is why it is a default rather than a flag. |
+| **Labels resolved against `getRootNode()`** | **Never the document** | `id` is scoped per root. A document lookup returns nothing — or, where the document happens to carry the same `id`, another element's text. The second is worse than the first and is what the test reverts to. |
 
 ## Still open
 
-One thing, and it is the only one that could still change the shape of the
-project.
+The one thing that could have changed the shape of the project is settled.
+What remains cannot be settled from a container.
 
-- [ ] **Are Workday's shadow roots open or closed?** Needs a real
-      `*.myworkdayjobs.com` application page. `chrome.dom.openOrClosedShadowRoot`
-      handles either, but a frame nested inside a shadow root is unreachable by
-      design. Every existing Workday automation used Playwright or the DevTools
-      protocol, which pierce shadow DOM natively, so none of them ever had to
-      answer this. A content script does not have that power.
+- [ ] **The stored country is a two-letter code that no dropdown lists.**
+      `readFillValues` hands out `country: 'US'`, and the importer writes that
+      literal — it does not parse a country out of the CV at all. A real
+      Workday menu lists *United States of America*, and `chooseOption`
+      refuses a two-character prefix on purpose, because `US` is also a
+      prefix of `Usually`. So the country dropdown is opened, correctly
+      declined and reported, every time. Found by Phase 4's gate refusing to
+      pass for the reason I first expected. Fixing it properly is a
+      CV-parsing question, not a fill question: either store the country as a
+      name, or teach the matcher a code-to-name table, and the first is
+      honest where the second is a second place for the answer to live.
+
+- [x] **Are Workday's shadow roots open or closed?** **Retired rather than
+      answered**, which is better. The question was unanswerable here — a real
+      application page sits behind a mandatory account, and this container
+      cannot reach `*.myworkdayjobs.com` at all — so spikes/phase-4 asked the
+      runnable one instead: *does it matter?*
+      `chrome.dom.openOrClosedShadowRoot` was only *claimed* to handle either
+      kind. It does, measured against roots the page itself sees as `null`,
+      nested two deep, with a flat query finding 0 controls where the pierce
+      finds 4. The adapter never needs to know which kind it is looking at.
+      The second half of the old note was also wrong: a frame inside a shadow
+      root **is** reachable. See `docs/02-architecture.md`.
 

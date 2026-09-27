@@ -61,6 +61,7 @@ const FIXTURE_ORIGINS = [
   'https://jobs.lever.co',
   'https://boards.greenhouse.io',
   'https://careers.acme.test',
+  'https://acme.wd5.myworkdayjobs.com',
 ];
 
 const BOARDS = {
@@ -99,6 +100,13 @@ const BOARDS = {
   embed: {
     url: 'https://boards.greenhouse.io/embed/job_app?for=acme&token=4102938',
     file: path.join(__dirname, '../fixtures/greenhouse.html'),
+  },
+  // Phase 4: every control inside a CLOSED shadow root, plus a dropdown that
+  // is not a <select> and a honeypot the document's own stylesheet cannot
+  // reach. Before this phase the page described as having zero fields.
+  workday: {
+    url: 'https://acme.wd5.myworkdayjobs.com/en-US/acme/job/Madrid/Engineer_R-1/apply/applyManually',
+    file: path.join(__dirname, '../fixtures/workday.html'),
   },
 };
 
@@ -700,6 +708,93 @@ async function main() {
   );
   await careers.job.close();
 
+  // ── Phase 4: a form that hides inside a closed shadow root ──────────
+  //
+  // This is where the browser API itself is tested. The unit tests drive a
+  // stub, because jsdom has no chrome.dom; a stub that lied would pass them
+  // and fail here.
+  const workday = await fillBoard('workday');
+  const wdPage = workday.job;
+
+  // Before anything about filling: is this page actually hostile? A check
+  // against a page whose roots turned out to be OPEN would prove nothing,
+  // and would look identical in the output.
+  const closed = await wdPage.evaluate(() => window.__closed ?? []);
+  check(
+    'workday: the three shadow roots really are CLOSED, so the rest means something',
+    closed.length === 3 && closed.every(Boolean),
+    JSON.stringify(closed),
+  );
+  const flat = await wdPage.evaluate(() => window.__flatCount?.() ?? -1);
+  check(
+    'workday: a flat query finds NOTHING, so reaching the form required the pierce',
+    flat === 0,
+    `${flat} control(s) visible to document.querySelectorAll`,
+  );
+
+  const wd = await wdPage.evaluate(() => window.__values?.() ?? {});
+  check(
+    'workday: it never submitted',
+    (await wdPage.evaluate(() => window.__submits ?? 0)) === 0,
+    JSON.stringify(wd).slice(0, 80),
+  );
+  check(
+    'workday: the fields inside the closed root hold the values the CV says',
+    wd.firstName === EXPECT.first && wd.lastName === EXPECT.last && wd.email === EXPECT.email,
+    JSON.stringify({ first: wd.firstName, last: wd.lastName, email: wd.email }),
+  );
+  check(
+    'workday: a field two roots deep was reached as well',
+    typeof wd.source === 'string',
+    `source = ${JSON.stringify(wd.source)}`,
+  );
+  // Invariant 2, on a page where reaching further is the whole point of the
+  // phase. Reading deeper must not mean filling more.
+  const wdSensitive = ['dateOfBirth', 'gender', 'ethnicity', 'disabilityStatus'];
+  check(
+    'workday: ZERO sensitive fields were filled, inside the closed root',
+    wdSensitive.every((k) => (wd[k] ?? '') === ''),
+    wdSensitive.filter((k) => (wd[k] ?? '') !== '').join(', ') || 'all empty',
+  );
+  // Invariant 3, likewise. The honeypot is hidden by a rule that lives
+  // inside the root, so a document stylesheet could not have hidden it.
+  check(
+    'workday: the beecatcher honeypot inside the closed root was NOT written',
+    (wd.beecatcher ?? '') === '',
+    `beecatcher = ${JSON.stringify(wd.beecatcher)}`,
+  );
+  check(
+    'workday: and it was refused BY THE DENYLIST, not merely left unrecognised',
+    /honeypot/i.test(workday.review ?? ''),
+    (workday.report ?? '').slice(0, 90),
+  );
+  // The custom dropdown: opened, read and answered inside one task. The CV
+  // says Orlando, so this is a value that travelled the whole way from the
+  // markdown rather than one planted in the fixture to make it pass.
+  check(
+    'workday: the custom listbox was opened and answered in a single pass',
+    wd.__city === 'Orlando',
+    `city reads ${JSON.stringify(wd.__city)}`,
+  );
+  // And the other half, which matters more. The vault stores the country as
+  // the two-letter code `US`; the menu lists "United States of America".
+  // chooseOption refuses a two-character prefix on purpose, so the right
+  // outcome is an untouched field and a line in the review saying why — not
+  // the closest-looking option. A gate that only tested the answerable case
+  // would call guessing a pass.
+  check(
+    'workday: a dropdown it cannot answer is LEFT ALONE, not guessed at',
+    (wd.__country ?? '') === '',
+    `country reads ${JSON.stringify(wd.__country)}`,
+  );
+  check(
+    'workday: and the review says it was opened and not answered',
+    /not among the options/i.test(workday.review ?? ''),
+    (workday.review ?? '').split('\n').find((l) => /not among the options/i.test(l)) ??
+      '(no such line)',
+  );
+  await wdPage.close();
+
   // ── The two refusals, which used to be one ──────────────────────────
   //
   // A board page with no form, and a page with no content script at all, are
@@ -746,12 +841,19 @@ async function main() {
     JSON.stringify({ permissions: manifest.permissions, hosts: manifest.host_permissions ?? null }),
   );
   check(
-    'the content script is declared for the two boards only, in all frames',
+    'the content script is declared for the three supported boards only, in all frames',
     (manifest.content_scripts ?? []).every(
       (c) =>
         c.all_frames === true &&
+        // Spelled out rather than loosened to a wildcard. The point of this
+        // check is that adding a host is a visible edit here, so a pattern
+        // permissive enough to absorb the next one silently would delete
+        // the check while leaving it looking present. Workday's own entry
+        // IS a wildcard, and only over its own apex.
         (c.matches ?? []).every((m) =>
-          /^https:\/\/(jobs\.lever\.co|(job-)?boards\.greenhouse\.io)\/\*$/.test(m),
+          /^https:\/\/(jobs\.lever\.co|(job-)?boards\.greenhouse\.io|\*\.myworkdayjobs\.com)\/\*$/.test(
+            m,
+          ),
         ),
     ),
     JSON.stringify((manifest.content_scripts ?? []).map((c) => c.matches)),

@@ -26,7 +26,10 @@ Note both Greenhouse hosts. `boards.greenhouse.io` is the legacy board and
 market.
 
 `*.myworkdaysite.com` was seen referenced as an alternate Workday candidate host
-but could not be confirmed. Probe it before adding.
+but could not be confirmed. Probe it before adding. **Still not added** as of
+Phase 4: an unconfirmed host widens where the content script runs in exchange
+for nothing proven, and `scripts/guard.mjs` will refuse it until somebody
+puts it on the allowlist deliberately.
 
 ---
 
@@ -125,7 +128,7 @@ None of them fills automatically, ever.
 | **Step count varies per employer** | Read the live Application Progress list. One employer has six steps, another has eight. Never hardcode. |
 | **A click-intercepting overlay** | Normal clicks time out while buttons report visible and enabled. Playwright automations use `force: true`; a content script needs synthetic dispatched events. |
 | **Custom listboxes, not `<select>`** | The menu must be opened and the option selected in one synchronous pass. The menu closes between asynchronous round trips and a later query finds zero options. |
-| **Shadow-heavy** | Described that way by more than one project. **Whether the roots are open or closed is the single unverified fact that most affects Phase 4.** Probe it first. `chrome.dom.openOrClosedShadowRoot` handles either, but a frame nested inside a shadow root is unreachable by design. |
+| **Shadow-heavy** | ~~The single unverified fact that most affects Phase 4.~~ **Settled, and it does not matter.** `chrome.dom.openOrClosedShadowRoot` does handle either — measured in spikes/phase-4 against roots the page itself sees as `null`, nested two deep. The rest of that row was wrong: a frame inside a shadow root **is** reachable. What the pierce does NOT fix on its own is labels (`id` is scoped per root) and events (a bubbling one stops at the boundary); both needed their own fix. |
 | **Saved drafts resume automatically** | Landing on `/apply` may skip the entry choice. Detect state from the progress list, not from the URL. |
 
 ---

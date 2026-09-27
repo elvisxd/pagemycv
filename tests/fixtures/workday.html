@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Apply — Acme (Workday)</title>
+</head>
+<body>
+  <h1>Application</h1>
+
+  <!--
+    Nothing below is reachable by document.querySelectorAll. Every control on
+    this page lives inside a CLOSED shadow root, which is the whole point:
+    before Phase 4 this page described as having zero fields, and "this form
+    has no fields" is a worse answer than "I cannot read this form" because
+    it sounds like an answer.
+
+    Not a copy of Workday. Nothing here was taken from a real tenant. It
+    holds the documented traps still so they can be asserted against.
+  -->
+  <my-information data-shadow-host="myInformation"></my-information>
+  <voluntary-disclosures data-shadow-host="voluntary"></voluntary-disclosures>
+
+  <!--
+    Two dropdowns in the light DOM, so the one-task question is tested on its
+    own rather than tangled with the shadow one.
+
+    City is answerable: the CV says Orlando and the menu lists it. Country is
+    NOT, and that is deliberate — the vault stores the two-letter code `US`
+    while a real Workday menu lists "United States of America", and
+    chooseOption refuses a two-character prefix on purpose ("US" is also a
+    prefix of "Usually"). Asserting both is the only way to show the
+    mechanism works AND that it declines rather than guessing when it cannot
+    tell. A fixture whose menu happened to contain the exact stored string
+    would prove the first and hide the second.
+  -->
+  <div data-automation-id="formField-city">
+    <label>City</label>
+    <span class="display"></span>
+    <button type="button" aria-haspopup="listbox">City</button>
+    <div class="menu"></div>
+  </div>
+  <div data-automation-id="formField-countryRegion">
+    <label>Country</label>
+    <span class="display"></span>
+    <button type="button" aria-haspopup="listbox">Country</button>
+    <div class="menu"></div>
+  </div>
+
+  <button type="button" data-automation-id="pageFooterNextButton">Next</button>
+
+  <script>
+  (() => {
+    const root = document
+      .querySelector('my-information')
+      .attachShadow({ mode: 'closed' });
+    root.innerHTML = `
+      <style>
+        /* Inside the root. A document stylesheet does not cross the
+           boundary, so a rule written outside would never apply and the
+           honeypot below would read as an ordinary visible field. */
+        .off { position: absolute; width: 1px; height: 1px;
+               overflow: hidden; clip-path: inset(50%); }
+      </style>
+      <label for="fn">First Name</label>
+      <input id="fn" name="firstName"
+             data-automation-id="formField-legalName--firstName">
+      <label for="ln">Last Name</label>
+      <input id="ln" name="lastName"
+             data-automation-id="formField-legalName--lastName">
+      <label for="em">Email Address</label>
+      <input id="em" type="email" name="email" data-automation-id="email">
+      <label for="ct">City</label>
+      <input id="ct" name="city" data-automation-id="formField-city">
+
+      <!-- The honeypot, inside the closed root and hidden the way Workday
+           hides it. Two layers must refuse it: the denylist by name and the
+           visibility gate by geometry. -->
+      <input name="beecatcher" data-automation-id="beecatcher" class="off"
+             tabindex="-1"
+             aria-label="This input is for robots only, do not enter if you're human.">
+
+      <!-- A root nested inside this one, so the walk is tested past depth 1. -->
+      <nested-block data-shadow-host="nested"></nested-block>`;
+
+    const nested = root.querySelector('nested-block').attachShadow({ mode: 'closed' });
+    nested.innerHTML =
+      '<label for="src">How did you hear about us?</label>' +
+      '<input id="src" name="source" data-automation-id="formField-source">';
+
+    // The sensitive class, inside a closed root. Reaching further into the
+    // page must not mean filling more of it: invariant 2 says these stay
+    // empty, and now there is a version of them the flat query never saw.
+    const voluntary = document
+      .querySelector('voluntary-disclosures')
+      .attachShadow({ mode: 'closed' });
+    voluntary.innerHTML = `
+      <label for="dob">Date of Birth</label>
+      <input id="dob" name="dateOfBirth" data-automation-id="formField-dateOfBirth">
+      <label for="gen">Gender</label>
+      <input id="gen" name="gender" data-automation-id="formField-gender">
+      <label for="eth">Ethnicity</label>
+      <input id="eth" name="ethnicity" data-automation-id="formField-ethnicity">
+      <label for="dis">Disability Status</label>
+      <input id="dis" name="disabilityStatus"
+             data-automation-id="formField-disabilityStatus">`;
+
+    // Each dropdown's options exist only within the task that opened it.
+    const wire = (automationId, options) => {
+      const combo = document.querySelector(`[data-automation-id="${automationId}"]`);
+      const menu = combo.querySelector('.menu');
+      combo.querySelector('button').addEventListener('click', () => {
+        if (menu.innerHTML) { menu.innerHTML = ''; return; }
+        menu.innerHTML = options.map((c) => '<div role="option">' + c + '</div>').join('');
+        setTimeout(() => { menu.innerHTML = ''; }, 0);
+      });
+      menu.addEventListener('click', (e) => {
+        if (e.target.getAttribute('role') === 'option') {
+          combo.querySelector('.display').textContent = e.target.textContent;
+          menu.innerHTML = '';
+        }
+      });
+      return combo;
+    };
+    const cityCombo = wire('formField-city', ['Miami', 'Orlando', 'Tampa']);
+    const countryCombo = wire('formField-countryRegion', [
+      'United States of America',
+      'United Kingdom',
+      'Ireland',
+    ]);
+
+    // Records any submit attempt, so invariant 1 is asserted rather than
+    // assumed on a page whose controls we now reach into.
+    window.__submits = 0;
+    document.addEventListener('submit', () => { window.__submits++; });
+
+    // ── How the harness reads a page it cannot see into ────────────────
+    //
+    // Playwright evaluates in the MAIN world, which has no
+    // chrome.dom.openOrClosedShadowRoot — so the test cannot open these
+    // roots either. The page reports its own state instead, from the
+    // handles it kept when it attached them.
+    //
+    // This is not a back door for the extension: nothing below is reachable
+    // from outside, the extension does not use it, and __closed proves the
+    // roots really are closed. If they were not, every check that follows
+    // would be passing against an open root and proving nothing.
+    // The handles attachShadow returned. `.shadowRoot` is null for every one
+    // of these — which is the point, and is what __closed records.
+    const roots = [root, nested, voluntary];
+    window.__closed = [
+      document.querySelector('my-information').shadowRoot === null,
+      root.querySelector('nested-block').shadowRoot === null,
+      document.querySelector('voluntary-disclosures').shadowRoot === null,
+    ];
+    window.__values = () => {
+      const out = {};
+      const collect = (r) => {
+        for (const el of r.querySelectorAll('input, select, textarea')) {
+          out[el.getAttribute('name') || el.id] = el.value;
+        }
+      };
+      for (const r of roots) collect(r);
+      out['__city'] = cityCombo.querySelector('.display').textContent || '';
+      out['__country'] = countryCombo.querySelector('.display').textContent || '';
+      return out;
+    };
+    // What a flat query sees. Zero is the measurement that says the pierce
+    // was necessary rather than incidental.
+    window.__flatCount = () => document.querySelectorAll('input, select, textarea').length;
+  })();
+  </script>
+</body>
+</html>
