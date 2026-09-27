@@ -102,6 +102,17 @@ forced by evidence rather than by taste.
 | **Which frame, when there are several** | **Most fields, ties broken by top frame then lowest id** | Deterministic on purpose. A fill that lands somewhere different on the second run is worse than one that refuses. |
 | **Saying where it filled** | **The panel names the board when the form was embedded** | The click happened on a company careers page and the values went into a form served by somebody else. Silence there is the difference between trusted and merely convenient. |
 
+## Decided by the Phase 3 review
+
+| Decision | Chose | Because |
+|---|---|---|
+| **Detecting "no content script here"** | **The adapter classifies; the rule does not guess** | The rule matched Chrome's error wording, and the messaging library replaces it with its own. Unit tests passed against text that never arrives. The translation now lives next to the library that does it, and `isNoListener` is tested against **both** wordings. |
+| **How long to treat silence as meaningful** | **Two budgets: short while nothing has answered, long once something has** | Silence early is weak evidence, because a careers page has no content script anywhere until its embed mounts. Silence later is strong. One budget got it wrong in both directions, one after the other. |
+| **What counts as a field, for ranking frames** | **Only what a person could fill** | Hidden inputs, submit buttons and disabled controls were counted, and that count decides which embedded form gets filled. |
+| **Refusal messages** | **Two, not one** | "Not a board" and "a board with no form on this page" are different problems. The second is the commonest way a fill does not work — being on the job description — and one shared message sent people looking for a bug instead of clicking Apply. |
+| **Announcing an import** | **After the refresh, not before** | The panel said "5 roles, 2 degrees" while the list below still showed the old profile. A promise made ahead of the thing it promises. |
+| **Where roll-call logic lives** | **`src/fill/roll-call.ts`, with Chrome injected** | It was inside the background entrypoint, which nothing can import, so it had no tests — the same defect that hid Phase 2's bugs in `descriptor.ts` and `write.ts`. |
+
 ## Still open
 
 One thing, and it is the only one that could still change the shape of the

@@ -17,7 +17,42 @@ import type { FieldDescriptor, VisibilityMetrics } from './types';
 
 export type Control = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
-const SELECTOR = 'input, select, textarea';
+export const SELECTOR = 'input, select, textarea';
+
+/**
+ * Input types nobody fills from a CV, for the roll call's field count.
+ *
+ * The count decides which frame holds the form when a careers page embeds
+ * more than one, so counting a hidden input or a submit button is not a
+ * rounding error: a frame with two real fields and five hidden ones would
+ * beat a frame with three real ones, and the wrong form gets filled.
+ */
+const UNCOUNTED_TYPES = new Set([
+  'hidden',
+  'submit',
+  'button',
+  'reset',
+  'image',
+  'password',
+  'search',
+]);
+
+/**
+ * How many controls in this document are plausibly part of an application.
+ *
+ * Deliberately cheap and deliberately not the same as what `describeForm`
+ * returns: this runs in every frame on every roll call, before anything is
+ * decided, and it only has to rank frames against each other.
+ */
+export function countFillable(doc: Document = document): number {
+  let n = 0;
+  for (const el of doc.querySelectorAll(SELECTOR)) {
+    if (el instanceof HTMLInputElement && UNCOUNTED_TYPES.has(el.type.toLowerCase())) continue;
+    if (el.hasAttribute('disabled')) continue;
+    n++;
+  }
+  return n;
+}
 
 /**
  * Past this, it is prose rather than a field name.

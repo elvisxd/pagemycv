@@ -291,6 +291,27 @@ asking for one.
 | The manifest still requests **no** host permissions, no `webNavigation`, no `tabs` | pass |
 | The content script is declared for the two boards only, in all frames | pass |
 | The panel reached the embedded form at all | pass |
+| A board page with no form is refused, and says so | pass |
+| A page with no content script is refused with a **different** reason | pass |
+| And refused without spending the long retry budget | pass |
+
+### The review, after the phase passed its gate
+
+Four findings. The first two were mine, made while fixing something else,
+which is the pattern these reviews exist to catch.
+
+| Finding | Why it mattered |
+|---|---|
+| **The "no listener" check never fired.** It matched Chrome's wording, and `@webext-core/messaging` replaces that with its own `Error: No response`. | The retry budget was spent on every ordinary page: **2356 ms** to say "I do not know this site", where Phase 2 answered at once. The unit tests passed against Chrome's text the whole time. Found by probing what the call actually threw. |
+| **Silence means two different things.** Stopping at the first silence then called every careers page unsupported: until its embed mounts, no frame in the tab runs our content script, and it looks exactly like an unrelated site. | Two budgets now: a short one while nothing has answered, a long one once something has. Both are pinned by tests, including the one that broke the first fix. |
+| **The roll call counted fields nobody can fill** — hidden inputs, submit buttons, disabled controls. That count is what ranks frames when a page embeds more than one form, so a frame with two real fields and five hidden ones beat a frame with three real ones. | `countFillable` in descriptor.ts, shared with the selector it had been written out beside. The same duplication that broke text normalisation in Phase 2. |
+| **Two different problems shared one message.** "I do not know this page" was also what you got on a board page while looking at the job description rather than the application form. | That is the commonest way a fill "does not work", and the message sent people hunting for a bug instead of clicking Apply. Two messages now, and the gate asserts each one against its own fixture. |
+
+**The cause of all four is the same:** `rollCall` and the roster lived inside
+`src/entrypoints/background.ts`, which nothing can import, so they had no
+tests. `src/fill/roll-call.ts` now holds the decision with its Chrome calls
+injected — the clock is a counter, so a two-second budget is tested in zero
+milliseconds and the pass count is exact rather than approximate.
 
 Ashby stays out. It is the same shape — its embed is its own iframe — so
 adding it is a registry entry plus a probe, not a design change.

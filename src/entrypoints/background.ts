@@ -11,6 +11,7 @@ import { classify } from '../fill/detect';
 import type { FrameChoice, FrameReport } from '../fill/frames';
 import { chooseFrame, describeFrame } from '../fill/frames';
 import { buildPlan, planNeedsResume } from '../fill/plan';
+import { isNoListener, rollCall } from '../fill/roll-call';
 import type { FillReport } from '../fill/types';
 import type { DbProtocol } from '../messaging/db';
 import { sendDb } from '../messaging/db';
@@ -54,8 +55,20 @@ async function withVault<T>(run: () => Promise<T>): Promise<T> {
   return run();
 }
 
-const UNSUPPORTED =
-  'PageMyCV found no Lever or Greenhouse application form on this page, either directly or embedded in it.';
+/** The page is not a job board at all: no frame is running our content script. */
+const NOT_A_BOARD =
+  'PageMyCV does not know this page. It works on Lever and Greenhouse application forms, including ones embedded in a company careers page.';
+
+/**
+ * It IS a board, and there is no form on it.
+ *
+ * Worth its own wording because it is the common way a fill "does not work":
+ * being on the job description rather than on the application form. The two
+ * used to share one message, which sent people looking for a bug in the
+ * extension instead of clicking Apply.
+ */
+const NO_FORM_HERE =
+  'This looks like a job board page but has no application form on it yet. If you are on the job description, open the application form first.';
 
 /**
  * How long to wait for frames to answer a roll call.
@@ -79,6 +92,16 @@ const ROLL_CALL_MS = 250;
  * case still costs one pass.
  */
 const ROLL_CALL_BUDGET_MS = 2000;
+
+/**
+ * How long to keep asking while nothing at all has answered.
+ *
+ * Short, because this is the ordinary "not a job board" page and the answer
+ * should be immediate — but not zero, because a careers page has no content
+ * script anywhere in it until its embed finishes mounting, and stopping at
+ * the first silence called every one of them unsupported.
+ */
+const ROLL_CALL_SILENCE_MS = 900;
 
 /**
  * Frames that answered, keyed by tab then frame.
@@ -114,33 +137,28 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
  *
  * A broadcast with no frameId reaches them all but resolves with whichever
  * answers first, so the answers come back as separate `fill:here` messages
- * instead and this waits for them to land.
+ * instead and this waits for them to land. The decision — how long to wait,
+ * when to stop, and what "no content script at all" means — lives in
+ * src/fill/roll-call.ts, where it can be tested.
  */
-async function rollCallOnce(tabId: number): Promise<FrameReport[]> {
-  roster.delete(tabId);
-  // The broadcast itself rejects when NO frame has a listener, which is the
-  // ordinary "this page is not a job board" case rather than a failure.
-  await sendFill('fill:rollCall', undefined, tabId).catch(() => {});
-  await new Promise((resolve) => setTimeout(resolve, ROLL_CALL_MS));
-  return [...(roster.get(tabId)?.values() ?? [])];
-}
-
-/**
- * Roll call, repeated until something usable answers or the budget runs out.
- *
- * `accept` decides what usable means, so the retry is spent on the question
- * being asked rather than on any frame at all.
- */
-async function rollCall(
-  tabId: number,
-  accept: (frames: FrameReport[]) => boolean = (f) => f.length > 0,
-): Promise<FrameReport[]> {
-  const deadline = Date.now() + ROLL_CALL_BUDGET_MS;
-  let frames = await rollCallOnce(tabId);
-  while (!accept(frames) && Date.now() < deadline) {
-    frames = await rollCallOnce(tabId);
-  }
-  return frames;
+function callFrames(tabId: number, accept: (frames: FrameReport[]) => boolean) {
+  return rollCall(
+    {
+      // True when some frame listened. The messaging layer replaces Chrome's
+      // "Receiving end does not exist" with its own "No response", so the
+      // classification lives here, next to the library that does it.
+      broadcast: () =>
+        sendFill('fill:rollCall', undefined, tabId)
+          .then(() => true)
+          .catch((err: unknown) => !isNoListener(err)),
+      collected: () => [...(roster.get(tabId)?.values() ?? [])],
+      reset: () => roster.delete(tabId),
+      wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+    },
+    { perPass: ROLL_CALL_MS, budget: ROLL_CALL_BUDGET_MS, silenceBudget: ROLL_CALL_SILENCE_MS },
+    accept,
+  );
 }
 
 /**
@@ -173,11 +191,15 @@ async function fillActiveTab(): Promise<FillReport> {
   // Which frame holds the form. On a board's own page that is the top frame;
   // on a company careers page it is the board's iframe, and the page around
   // it is never touched, read, or even reachable — see spikes/phase-3.
+  //
   // Keep asking until a frame with a form answers: an embed mounted by script
-  // may still be loading when the button is clicked.
-  const frames = await rollCall(tabId, (f) => chooseFrame(f) !== null);
+  // may still be loading when the button is clicked. But stop at once when
+  // NOTHING is listening, because a page with no content script will not grow
+  // one, and spending the retry budget there made an ordinary page take two
+  // seconds to say it is not a job board.
+  const { frames, reachable } = await callFrames(tabId, (f) => chooseFrame(f) !== null);
   const choice: FrameChoice | null = chooseFrame(frames);
-  if (!choice) throw new Error(UNSUPPORTED);
+  if (!choice) throw new Error(reachable ? NO_FORM_HERE : NOT_A_BOARD);
   const target = { tabId, frameId: choice.frame.frameId };
 
   // A connection error here means the frame went away between the roll call
@@ -192,8 +214,8 @@ async function fillActiveTab(): Promise<FillReport> {
     throw err;
   });
   const ats = atsForUrl(survey.url);
-  if (ats.id === 'unknown') throw new Error(UNSUPPORTED);
-  if (survey.fields.length === 0) throw new Error('no form fields were found on this page');
+  if (ats.id === 'unknown') throw new Error(NOT_A_BOARD);
+  if (survey.fields.length === 0) throw new Error(NO_FORM_HERE);
 
   // The values are fetched only once a form is known to exist, so opening the
   // panel on a job description never decrypts anything.
@@ -242,7 +264,10 @@ onVault('vault:clearFill', async () => {
   // worker may have been terminated since, and a highlight nobody can clear
   // is a mark left on somebody's page.
   const tabId = await activeTabId();
-  const frames = await rollCall(tabId);
+  // One pass, no retry: clearing a highlight nobody drew is not worth waiting
+  // for, and every frame that could hold one has already answered a roll call
+  // to have been filled in the first place.
+  const { frames } = await callFrames(tabId, () => true);
   await Promise.all(
     frames.map((f) => sendFill('fill:clear', undefined, { tabId, frameId: f.frameId })),
   );

@@ -8,7 +8,7 @@
 // tests/e2e/gate.cjs exists for.
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Control } from '../../src/fill/descriptor';
-import { describeForm, fingerprintOf, labelFor } from '../../src/fill/descriptor';
+import { countFillable, describeForm, fingerprintOf, labelFor } from '../../src/fill/descriptor';
 import type { FillValues, PlannedField } from '../../src/fill/types';
 import { applyPlan, clearHighlights } from '../../src/fill/write';
 
@@ -259,5 +259,56 @@ describe('applyPlan', () => {
     clearHighlights([el]);
     expect(el.style.outline).toBe('1px dashed red');
     expect(el.style.outlineOffset).toBe('4px');
+  });
+});
+
+// ── countFillable ───────────────────────────────────────────────────────────
+
+describe('countFillable', () => {
+  it('counts the controls a person would actually fill', () => {
+    render('<input name="a"><select name="b"></select><textarea name="c"></textarea>');
+    expect(countFillable(document)).toBe(3);
+  });
+
+  it('ignores hidden inputs and buttons', () => {
+    // This count ranks frames against each other when a careers page embeds
+    // more than one form. Counting a hidden input or a submit button is not a
+    // rounding error: it picks the wrong form.
+    render(`
+      <input name="real">
+      <input type="hidden" name="csrf">
+      <input type="submit" value="Apply">
+      <button type="submit">Apply</button>
+      <input type="reset">
+      <input type="image">
+    `);
+    expect(countFillable(document)).toBe(1);
+  });
+
+  it('ignores a disabled control, which cannot be filled either', () => {
+    render('<input name="a"><input name="b" disabled>');
+    expect(countFillable(document)).toBe(1);
+  });
+
+  it('would have ranked two embedded forms the wrong way round before', () => {
+    // Three real fields beats two real fields plus five hidden ones, and the
+    // naive count said the opposite.
+    const realForm = '<input name="a"><input name="b"><input name="c">';
+    const decoy =
+      '<input name="x"><input name="y">' +
+      '<input type="hidden"><input type="hidden"><input type="hidden">' +
+      '<input type="hidden"><input type="submit">';
+    render(`<div id="real">${realForm}</div>`);
+    const real = countFillable(document);
+    render(`<div id="decoy">${decoy}</div>`);
+    const fake = countFillable(document);
+    expect(real).toBeGreaterThan(fake);
+  });
+
+  it('counts a search box, because a board page with one is still a board page', () => {
+    // `search` is excluded from the type list but a text input named search
+    // is not: the rule is about control types, not about guessing intent.
+    render('<input type="search" name="q"><input name="email">');
+    expect(countFillable(document)).toBe(1);
   });
 });
