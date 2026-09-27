@@ -743,10 +743,16 @@ async function main() {
     wd.firstName === EXPECT.first && wd.lastName === EXPECT.last && wd.email === EXPECT.email,
     JSON.stringify({ first: wd.firstName, last: wd.lastName, email: wd.email }),
   );
+  // Two roots deep, asserted on a VALUE rather than on the key existing.
+  // The first version checked `typeof wd.source === 'string'` against a
+  // field the vault has nothing for — and the read-back walks these roots
+  // itself, so the key is there whether the extension reached it or not.
+  // That check was true no matter what happened, which is worse than no
+  // check because it reads like one.
   check(
-    'workday: a field two roots deep was reached as well',
-    typeof wd.source === 'string',
-    `source = ${JSON.stringify(wd.source)}`,
+    'workday: a field two roots deep was filled, not merely seen',
+    wd.phoneNumber === EXPECT.phone,
+    `phone at depth 2 = ${JSON.stringify(wd.phoneNumber)}`,
   );
   // Invariant 2, on a page where reaching further is the whole point of the
   // phase. Reading deeper must not mean filling more.

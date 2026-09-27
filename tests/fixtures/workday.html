@@ -69,8 +69,6 @@
              data-automation-id="formField-legalName--lastName">
       <label for="em">Email Address</label>
       <input id="em" type="email" name="email" data-automation-id="email">
-      <label for="ct">City</label>
-      <input id="ct" name="city" data-automation-id="formField-city">
 
       <!-- The honeypot, inside the closed root and hidden the way Workday
            hides it. Two layers must refuse it: the denylist by name and the
@@ -83,9 +81,15 @@
       <nested-block data-shadow-host="nested"></nested-block>`;
 
     const nested = root.querySelector('nested-block').attachShadow({ mode: 'closed' });
+    // A field the vault HAS a value for. The first version put an unfillable
+    // one here and asserted `typeof source === 'string'`, which is true of
+    // the empty string — and __values() walks these roots itself, so the key
+    // is present whether the extension reached it or not. The check was
+    // always true. A phone number at depth 2 is a value that can only be
+    // there if the walk got there.
     nested.innerHTML =
-      '<label for="src">How did you hear about us?</label>' +
-      '<input id="src" name="source" data-automation-id="formField-source">';
+      '<label for="ph">Phone</label>' +
+      '<input id="ph" name="phoneNumber" data-automation-id="formField-phoneNumber">';
 
     // The sensitive class, inside a closed root. Reaching further into the
     // page must not mean filling more of it: invariant 2 says these stay
