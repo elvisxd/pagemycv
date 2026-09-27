@@ -366,6 +366,13 @@ supported used shadow DOM, all of them silent:
   strings are modelled from documentation. They live on the ATS definition as
   data so that opening one real tenant fixes them without touching logic.
 
+**How to close it:** `spikes/phase-4/capture-from-a-real-tenant.js` is a
+console snippet that collects exactly what would settle the hypothesis half
+— the automation ids, the dropdown shape, and whether the menu really dies
+between tasks — and never reads a field value. It reads and does not write,
+and there is no `.value` access anywhere in it. Paste it into one real
+application and only data should need to change.
+
 **Gate: not met, and it cannot be met from here.** The documented gate is a
 complete application across every wizard step, submitted by hand. That needs
 an account on a real tenant — account creation is manual by design, and this

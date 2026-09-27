@@ -97,6 +97,44 @@ announces itself with its own `frameId`. Phase 3 already builds its roster from
 those announcements rather than from enumeration, so the fallback that row asks
 for is dead code that was never needed.
 
+## Closing the gap: capture-from-a-real-tenant.js
+
+The part of Phase 4 that is a hypothesis is small and precisely bounded: the
+`data-automation-id` map and the dropdown selectors in `src/ats/registry.ts`.
+Everything else was measured. `capture-from-a-real-tenant.js` is a console
+snippet that collects exactly what would settle it, and nothing else.
+
+```
+1. Open a real application on any {tenant}.wd{n}.myworkdayjobs.com
+2. Get as far as the "My Information" step (the account is yours to make;
+   the extension never creates one)
+3. DevTools console, paste the file, press enter — it copies its own output
+4. Optionally:  await pagemycv.probeDropdown("formField-countryRegion")
+```
+
+**It reads and does not write.** `report()` only queries the DOM.
+`probeDropdown()` is separate and opt-in because it clicks a menu open, and
+that is somebody's real application.
+
+**It never collects a field value.** Not filtered out afterwards — never
+read in the first place, which is a different and checkable promise: there
+is no `.value` access anywhere in the file. Attribute names, tag names,
+roles, label text and counts only, so the output is safe to paste back.
+
+### What each part of the output settles
+
+| Output | What it decides |
+|---|---|
+| `automationIds` | Whether the map in `registry.ts` names the right things, and what it is missing |
+| `dropdowns[].trigger` | Whether `button[aria-haspopup="listbox"], [role="combobox"]` is the real trigger |
+| `probeDropdown(...)` counts | Whether the menu really is gone by the next task. Two different numbers means the synchronous open-and-pick is required; two equal numbers means it was modelled on something that is not true, and `write.ts` can be simpler |
+| `optionsRenderedInsideTheField` | Whether the menu is a descendant of the field or portalled to `<body>`. `selectFromListbox` already handles both; this says which one is real |
+| `customElementsWeCannotSeeInto` | Non-zero means the fields are behind closed roots — the case the extension handles and the console cannot. Confirms the pierce is load-bearing on a real page |
+| `progressList` | The only input the wizard step-count work needs, and the reason it is not built |
+
+Only data should need to change afterwards. That separation is the whole
+reason the selectors live on the ATS definition rather than in `write.ts`.
+
 ## What this spike does not answer
 
 - Whether Workday's roots are in fact closed. Retired, not answered.
