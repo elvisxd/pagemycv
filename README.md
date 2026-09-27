@@ -10,11 +10,12 @@ PageMyCV is the browser half of [Byte](https://github.com/elvisxd/byte). Byte fi
 the job, scores it against your profile and writes the text. PageMyCV is the hand
 that types it into the form and then stops.
 
-**Status: Phase 3 done.** It fills Lever and Greenhouse applications from an
-encrypted local vault — on the board itself, or embedded in a company's own
-careers page, which is where most applications actually live. It attaches your
-résumé, highlights everything it wrote, and refuses to touch a sensitive field
-or a honeypot. It still has no network code at all.
+**Status: Phase 4 partly done.** It fills Lever, Greenhouse and Workday
+applications from an encrypted local vault — on the board itself, embedded in
+a company's own careers page, which is where most applications actually live,
+or hidden inside a closed shadow root, which is where Workday puts them. It
+attaches your résumé, highlights everything it wrote, and refuses to touch a
+sensitive field or a honeypot. It still has no network code at all.
 
 | | |
 |---|---|
@@ -99,8 +100,9 @@ open job APIs:
 
 `Lever` · `Greenhouse`
 
-The extension runs on `jobs.lever.co`, `boards.greenhouse.io` and
-`job-boards.greenhouse.io`, and nowhere else. There are no host permissions:
+The extension runs on `jobs.lever.co`, `boards.greenhouse.io`,
+`job-boards.greenhouse.io` and any `*.myworkdayjobs.com` tenant, and nowhere
+else. There are no host permissions:
 the content script's own match list is the entire grant, so the extension
 cannot read the address of a tab it is not running in.
 
@@ -116,11 +118,23 @@ Ashby moved out of the first batch. It renders inside its own iframe, which
 makes it the same problem as an embedded Greenhouse form on a company's
 careers page — Phase 3, not Phase 2.
 
-Then, as its own phase, because it is a shadow-heavy single-page app with a bot
-honeypot, a click-intercepting overlay and a wizard whose length changes per
-employer:
+**Partly working**, as its own phase, because it is a shadow-heavy
+single-page app with a bot honeypot, a click-intercepting overlay and a
+wizard whose length changes per employer:
 
 `Workday`
+
+The shadow DOM part is done and proven in a real browser: every control on a
+Workday form can sit inside a *closed* shadow root, which a normal query
+cannot see at all, and the extension reaches through it —
+[`spikes/phase-4/`](spikes/phase-4/) measured 0 controls found flat against 4
+found through the pierce. The honeypot is refused inside there too.
+
+What is **not** done: stepping the multi-page wizard, and the selectors for
+Workday's custom dropdowns, which are modelled from documentation because
+nobody has opened a real tenant yet. They live as data on the ATS definition
+so that one real page fixes them without touching any logic. Treat Workday as
+"fills the page in front of you, check it before you continue".
 
 **Deliberately unsupported: LinkedIn and Indeed.** Both prohibit browser
 extensions that automate activity on their sites, whatever the extension does.
