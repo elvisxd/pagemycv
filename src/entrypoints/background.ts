@@ -6,7 +6,7 @@
 // FileSystemFileHandle.createSyncAccessHandle are both absent, verified in a
 // real browser, see spikes/phase-0.
 import { defineBackground } from 'wxt/utils/define-background';
-import { ATS_DEFINITIONS, atsForUrl } from '../ats/registry';
+import { atsForUrl, boardList } from '../ats/registry';
 import { classify } from '../fill/detect';
 import type { FrameChoice, FrameReport } from '../fill/frames';
 import { chooseFrame, describeFrame } from '../fill/frames';
@@ -66,12 +66,6 @@ async function withVault<T>(run: () => Promise<T>): Promise<T> {
  * when a fill does not work. Derived now, for the same reason
  * `CONTENT_MATCHES` is: adding a board cannot leave this behind.
  */
-function boardList(): string {
-  const names = ATS_DEFINITIONS.map((d) => d.label);
-  if (names.length <= 1) return names[0] ?? 'no boards yet';
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
-
 const NOT_A_BOARD = `PageMyCV does not know this page. It works on ${boardList()} application forms, including ones embedded in a company careers page.`;
 
 /**

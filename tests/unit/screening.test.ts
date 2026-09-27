@@ -5,7 +5,7 @@
 // is why they are worth keeping: they are not what I imagined a form asks,
 // they are what one actually asked.
 import { describe, expect, it } from 'vitest';
-import { ATS_DEFINITIONS, atsForUrl } from '../../src/ats/registry';
+import { ATS_DEFINITIONS, atsForUrl, boardList } from '../../src/ats/registry';
 import { classify } from '../../src/fill/detect';
 import { buildPlan } from '../../src/fill/plan';
 import type {
@@ -252,5 +252,23 @@ describe('the refusal message names every board it supports', () => {
     expect(ATS_DEFINITIONS.map((d) => d.label)).toEqual(
       expect.arrayContaining(['Lever', 'Greenhouse', 'Ashby', 'Workday']),
     );
+  });
+});
+
+describe('boardList', () => {
+  it('names every board, so neither user-facing list can go stale', () => {
+    // Two hand-written lists said "Lever and Greenhouse" after Ashby
+    // shipped: the refusal message, and the panel's own prompt — the one on
+    // screen while somebody tries to fill an Ashby form. Both read from
+    // this now, and this reads from ATS_DEFINITIONS.
+    for (const def of ATS_DEFINITIONS) {
+      expect(boardList()).toContain(def.label);
+      expect(boardList('or')).toContain(def.label);
+    }
+  });
+
+  it('joins with the word the sentence around it needs', () => {
+    expect(boardList()).toMatch(/ and [^,]+$/);
+    expect(boardList('or')).toMatch(/ or [^,]+$/);
   });
 });

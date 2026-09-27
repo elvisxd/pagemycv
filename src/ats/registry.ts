@@ -194,3 +194,21 @@ export const CONTENT_MATCHES: readonly string[] = ATS_DEFINITIONS.flatMap((d) =>
   // through; a bare host is written as itself and matches that host alone.
   d.hosts.map((h) => `https://${h}/*`),
 );
+
+/**
+ * The boards it knows, as a sentence, for the two places that tell somebody
+ * which those are.
+ *
+ * Both of them were hand-written lists naming Lever and Greenhouse, and both
+ * were still saying that after Ashby shipped — the refusal message, and the
+ * panel's own "Open a Lever or Greenhouse application", which is on screen
+ * while somebody tries to fill an Ashby form. One function rather than two
+ * copies for the reason `normaliseText` exists: the duplicate that drifts is
+ * always the one nobody is looking at.
+ */
+export function boardList(joiner: 'and' | 'or' = 'and'): string {
+  const names = ATS_DEFINITIONS.map((d) => d.label);
+  if (names.length === 0) return 'no boards yet';
+  if (names.length === 1) return names[0] as string;
+  return `${names.slice(0, -1).join(', ')} ${joiner} ${names[names.length - 1]}`;
+}
