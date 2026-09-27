@@ -16,7 +16,6 @@ import {
   Tally,
 } from '../../ui/components';
 import { toBase64 } from '../../util/base64';
-import { MIN_PASSPHRASE } from '../../vault/crypto';
 
 /**
  * How a planned field reads in the review list.
@@ -359,11 +358,13 @@ export function App() {
     return (
       <Screen>
         <Heading>PageMyCV</Heading>
-        <Muted>
-          {creating
-            ? `Choose a passphrase of at least ${MIN_PASSPHRASE} characters. It is never stored, so it cannot be recovered and it cannot be read off this machine.`
-            : 'Locked. Your CV stays encrypted until you unlock it.'}
-        </Muted>
+        {/* Nothing on the create screen. Elvis asked for the explanation to
+            go, and it was doing two jobs badly: teaching the key-derivation
+            model to somebody who has not asked, and burying the one fact
+            that matters — a forgotten passphrase is a lost CV. The worker
+            still refuses a short one and says why, so the length rule
+            arrives when it is relevant rather than as a preamble. */}
+        {creating ? null : <Muted>Locked. Your CV stays encrypted until you unlock it.</Muted>}
         <form
           onSubmit={(e) => {
             e.preventDefault();
