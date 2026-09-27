@@ -12,9 +12,6 @@ const board = (over: Partial<FrameReport> = {}): FrameReport => ({
   ...over,
 });
 
-/** What `@webext-core/messaging` actually throws. See isNoListener. */
-const NO_LISTENER = new Error('No response');
-
 /**
  * A fake tab. Time is a counter rather than a clock, so a two-second budget
  * costs nothing to test and the number of passes is exact rather than

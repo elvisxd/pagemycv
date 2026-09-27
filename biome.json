@@ -9,7 +9,7 @@
       "*.json",
       "!**/*.css",
       "!**/*.sql",
-      "!tests/fixtures/**",
+      "!tests/fixtures",
       "!src/fill/chromium-patterns.generated.ts"
     ]
   },
