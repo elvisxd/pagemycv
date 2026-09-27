@@ -315,7 +315,12 @@ if (contentText) {
   if (hosts.length === 0) {
     fail(registryPath, 'no host list could be read; the guard cannot verify the reach');
   }
-  const ALLOWED_HOSTS = ['jobs.lever.co', 'boards.greenhouse.io', 'job-boards.greenhouse.io'];
+  const ALLOWED_HOSTS = [
+    'jobs.lever.co',
+    'boards.greenhouse.io',
+    'job-boards.greenhouse.io',
+    'jobs.ashbyhq.com',
+  ];
   for (const h of hosts) {
     if (!ALLOWED_HOSTS.includes(h)) {
       fail(registryPath, `host "${h}" is not on the allowlist in scripts/guard.mjs`);

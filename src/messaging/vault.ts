@@ -5,7 +5,7 @@
 // simply does not answer it.
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { ProfileView, ResumeMeta, VaultState } from '../db/schema';
-import type { FillReport } from '../fill/types';
+import type { FillReport, ScreeningAnswers } from '../fill/types';
 
 export interface VaultProtocol {
   'vault:state'(): VaultState;
@@ -16,6 +16,8 @@ export interface VaultProtocol {
   'vault:importCv'(data: { markdown: string }): { imported: true; counts: Record<string, number> };
   'vault:touch'(): VaultState;
   'vault:resumeMeta'(): ResumeMeta | null;
+  'vault:screeningAnswers'(): ScreeningAnswers;
+  'vault:setScreeningAnswer'(data: { kind: string; answer: string }): { saved: true };
   'vault:setResume'(data: { filename: string; mimeType: string; base64: string }): {
     stored: true;
     meta: ResumeMeta;
