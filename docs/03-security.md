@@ -210,9 +210,27 @@ No telemetry, no analytics, no error reporting, no update ping beyond Chrome's
 own. The only outbound request in the entire codebase goes to the Byte endpoint
 you configured, and only when you ask for a free-text answer.
 
-**Test.** A build-time check that the only `fetch` call sites are in the Byte
+**Test.** A build-time check that the only network call sites are in the Byte
 client module, plus a runtime test asserting zero network activity during a full
 fill of a local fixture.
+
+**The build-time half had a hole, and it is worth writing down rather than
+quietly closing.** It was enforced as a list of six transports — `fetch`,
+`XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`, `importScripts`,
+`RTCPeerConnection`. `chrome.identity.getAuthToken` talks to Google and is
+none of them, so a call to it passed the guard in any file. `chrome.downloads`
+and `WebTransport` were missing for the same reason. Found while costing out
+a Google sign-in, not by a failing check.
+
+The lesson is about the shape of the claim rather than the missing entries.
+"Nothing phones home" was being enforced as "none of these six APIs", which
+is a narrower statement wearing the same name — and the name is what anyone
+reading the invariant list would have believed. A regex can never be
+complete here; what the list can honestly promise is that every way out
+*we know of* has to go through one named door, and that the list grows when
+somebody finds another. The runtime half in `gate.cjs`, which watches real
+requests leave the browser, is the one that does not depend on us having
+thought of the transport.
 
 ## Encryption at rest
 
