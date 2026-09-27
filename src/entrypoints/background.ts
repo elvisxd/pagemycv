@@ -221,11 +221,28 @@ async function fillActiveTab(): Promise<FillReport> {
   // The values are fetched only once a form is known to exist, so opening the
   // panel on a job description never decrypts anything.
   const { values, resume } = await sendDb('db:fillValues', undefined);
+  // Fetched beside the values, and kept apart from them all the way into the
+  // planner. A screening question can only ever be answered from here, so
+  // there is no path by which the CV parser could start answering one by
+  // inference — which is the guarantee the old outright refusal gave, kept.
+  const answers = await sendDb('db:screeningAnswers', undefined);
   const classifications = classify(survey.fields, ats);
-  const plan = buildPlan(survey.fields, classifications, values, ats, resume?.filename ?? null);
+  const plan = buildPlan(
+    survey.fields,
+    classifications,
+    values,
+    ats,
+    resume?.filename ?? null,
+    answers,
+  );
   // Planned here, in the background, for the same reason the fields are: the
   // content script is handed the one value it is going to write and never
   // the profile it came from.
+  //
+  // `values` rather than `answers`: a Workday dropdown asks for a country or
+  // a city, which the CV holds. A screening question is not a dropdown, and
+  // if one ever is, it needs its own decision rather than this one widened
+  // by accident.
   plan.listboxes = planListboxes(survey.listboxes, values, ats);
 
   const report = await sendFill(
@@ -251,6 +268,8 @@ const ROUTES: Record<keyof VaultProtocol, keyof DbProtocol | 'local'> = {
   'vault:touch': 'db:touch',
   'vault:resumeMeta': 'db:resumeMeta',
   'vault:setResume': 'db:setResume',
+  'vault:screeningAnswers': 'db:screeningAnswers',
+  'vault:setScreeningAnswer': 'db:setScreeningAnswer',
   'vault:fill': 'local',
   'vault:clearFill': 'local',
 };

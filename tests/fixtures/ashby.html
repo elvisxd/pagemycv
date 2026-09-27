@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Senior Full Stack Developer — Apply</title></head>
+<body>
+  <h1>Senior Full Stack Developer</h1>
+  <!--
+    The posting's own advertised band, on the same page as the form. The
+    salary matcher has to tell this apart from the question further down that
+    asks what YOU want, or it would refuse a field nobody is asking you about.
+  -->
+  <p>Compensation: CA$140K – CA$190K • Exact compensation may vary</p>
+
+  <form id="application">
+    <h2>About you</h2>
+
+    <label for="pref">Preferred Full Name</label>
+    <input id="pref" name="_systemfield_preferred_name">
+
+    <label for="legal">Legal Full Name</label>
+    <input id="legal" name="_systemfield_name">
+
+    <label for="pronouns">Pronouns</label>
+    <input id="pronouns" name="pronouns">
+
+    <label for="email">Email</label>
+    <input id="email" name="_systemfield_email" type="email">
+
+    <label for="phone">Phone number</label>
+    <input id="phone" name="_systemfield_phone" type="tel">
+
+    <label for="loc">Location</label>
+    <input id="loc" name="_systemfield_location">
+
+    <label for="resume">Resume</label>
+    <input id="resume" name="_systemfield_resume" type="file">
+
+    <label for="elig">Are you legally eligible to work in Canada?</label>
+    <input id="elig" name="q_eligible">
+
+    <label for="spon">Will you now or in the future require sponsorship for employment visa status to work in Canada?</label>
+    <input id="spon" name="q_sponsorship">
+
+    <label for="clear">Which utility do you have an active security clearance with?</label>
+    <input id="clear" name="q_clearance">
+
+    <label for="travel">Are you comfortable with the travel requirements listed in the job posting?</label>
+    <input id="travel" name="q_travel">
+
+    <label for="salary">What are you looking for as a base salary?</label>
+    <input id="salary" name="q_salary">
+
+    <label for="notice">How much notice would you need to give your current employer before starting in this role?</label>
+    <input id="notice" name="q_notice">
+
+    <!-- A real current-employer question, so the notice fix is not a blanket
+         refusal of the word. -->
+    <label for="employer">Current employer</label>
+    <input id="employer" name="q_employer">
+
+    <button type="submit">Submit Application</button>
+  </form>
+
+  <script>
+    window.__submits = 0;
+    document.addEventListener('submit', (e) => { e.preventDefault(); window.__submits++; });
+  </script>
+</body>
+</html>

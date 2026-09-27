@@ -326,6 +326,7 @@ if (contentText) {
     'jobs.lever.co',
     'boards.greenhouse.io',
     'job-boards.greenhouse.io',
+    'jobs.ashbyhq.com',
     // Subdomains only. Every Workday tenant has its own, so the host cannot
     // be enumerated; the apex is not an application form and the registry
     // returns `unknown` for it.

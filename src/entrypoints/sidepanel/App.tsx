@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import type { ProfileView, ResumeMeta, VaultState } from '../../db/schema';
-import type { FillReport, PlannedField } from '../../fill/types';
+import type { FieldKind, FillReport, PlannedField, ScreeningAnswers } from '../../fill/types';
 import { sendVault } from '../../messaging/vault';
 import {
   Button,
@@ -25,6 +25,46 @@ import { MIN_PASSPHRASE } from '../../vault/crypto';
  * value for look different at a glance. A honeypot correctly skipped has to
  * be visible, or nobody can tell the denylist still works.
  */
+/**
+ * The screening questions, and what each one is for.
+ *
+ * The hint matters as much as the label: these are answers that get written
+ * into real applications, so the box has to say what a good one looks like
+ * rather than leaving somebody to guess at the format.
+ */
+const SCREENING_PROMPTS: readonly { kind: FieldKind; label: string; hint: string }[] = [
+  {
+    kind: 'preferred_name',
+    label: 'Preferred name',
+    hint: 'What you want to be called, if it differs from your legal name. Left blank means left blank — it is never guessed from your CV.',
+  },
+  {
+    kind: 'notice_period',
+    label: 'Notice period',
+    hint: 'What you owe your current employer. "2 weeks", "1 month", "Immediately".',
+  },
+  {
+    kind: 'travel_ok',
+    label: 'Travel',
+    hint: 'Whether you accept the travel a role asks for, and any limit.',
+  },
+  {
+    kind: 'relocation_ok',
+    label: 'Relocation',
+    hint: 'Whether you would move, and where to.',
+  },
+  {
+    kind: 'security_clearance',
+    label: 'Security clearance',
+    hint: 'Which one you hold, if any. "None" is an answer and is often asked for.',
+  },
+  {
+    kind: 'how_did_you_hear',
+    label: 'How you heard about the role',
+    hint: 'The one you give most often. Change it per application when it matters.',
+  },
+];
+
 function chipFor(field: PlannedField): { state: State; label: string } {
   if (field.action === 'fill') return { state: 'filled', label: field.strategy };
   if (field.action === 'attach') return { state: 'filled', label: 'attached' };
@@ -39,6 +79,11 @@ function chipFor(field: PlannedField): { state: State; label: string } {
       return { state: 'skipped', label: 'already filled' };
     case 'unrecognised':
       return { state: 'review', label: 'not recognised' };
+    case 'unanswered':
+      // Its own chip, because this is the one refusal the person can act on:
+      // the answer goes in the box under "Your answers", and calling it
+      // "skipped" would hide the one thing they could do about it.
+      return { state: 'sensitive', label: 'needs your answer' };
     default:
       return { state: 'skipped', label: 'skipped' };
   }
@@ -83,6 +128,7 @@ export function App() {
   const [resume, setResume] = useState<ResumeMeta | null>(null);
   const [report, setReport] = useState<FillReport | null>(null);
   const [filling, setFilling] = useState(false);
+  const [answers, setAnswers] = useState<ScreeningAnswers>({});
   const passphraseRef = useRef<HTMLInputElement>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
   const markdownRef = useRef<HTMLTextAreaElement>(null);
@@ -116,9 +162,11 @@ export function App() {
     // immediately after unlocking reads as data loss.
     const view = await sendVault('vault:profile', undefined);
     const storedResume = await sendVault('vault:resumeMeta', undefined);
+    const stored = await sendVault('vault:screeningAnswers', undefined);
     if (mine !== request.current) return;
     setProfile(view);
     setResume(storedResume);
+    setAnswers(stored);
     setVault(state);
   }, []);
 
@@ -552,6 +600,37 @@ export function App() {
           ))}
         </Section>
       ) : null}
+
+      <Section title="Your answers">
+        <Muted>
+          The questions every application asks and no CV answers. Typed once, stored encrypted, and
+          written only into a field that asks for that exact thing. Nothing here is ever guessed
+          from your CV.
+        </Muted>
+        {SCREENING_PROMPTS.map(({ kind, label, hint }) => (
+          <label key={kind} style={{ display: 'block', marginTop: 10 }}>
+            <span style={{ fontSize: 12, color: 'var(--text)' }}>{label}</span>
+            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>
+              {hint}
+            </span>
+            <input
+              data-testid={`answer-${kind}`}
+              value={answers[kind] ?? ''}
+              disabled={busy}
+              onInput={(e) =>
+                setAnswers({ ...answers, [kind]: (e.target as HTMLInputElement).value })
+              }
+              onBlur={(e) => {
+                const answer = (e.target as HTMLInputElement).value;
+                sendVault('vault:setScreeningAnswer', { kind, answer })
+                  .then(() => refresh())
+                  .catch((err: Error) => setError(err.message));
+              }}
+              style={{ width: '100%', marginTop: 4, padding: '6px 8px', boxSizing: 'border-box' }}
+            />
+          </label>
+        ))}
+      </Section>
 
       {p?.contact ? (
         <Section title="Contact">

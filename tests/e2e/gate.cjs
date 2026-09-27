@@ -61,6 +61,7 @@ const FIXTURE_ORIGINS = [
   'https://jobs.lever.co',
   'https://boards.greenhouse.io',
   'https://careers.acme.test',
+  'https://jobs.ashbyhq.com',
   'https://acme.wd5.myworkdayjobs.com',
 ];
 
@@ -100,6 +101,13 @@ const BOARDS = {
   embed: {
     url: 'https://boards.greenhouse.io/embed/job_app?for=acme&token=4102938',
     file: path.join(__dirname, '../fixtures/greenhouse.html'),
+  },
+  // Every label copied from a real Ashby application. The screening
+  // questions on it are the reason this fixture exists: they are what a CV
+  // cannot answer, and two of them exposed bugs in shipped code.
+  ashby: {
+    url: 'https://jobs.ashbyhq.com/npx/a367c10e-7fa8-4276-bf76-19252af8787c/application',
+    file: path.join(__dirname, '../fixtures/ashby.html'),
   },
   // Phase 4: every control inside a CLOSED shadow root, plus a dropdown that
   // is not a <select> and a honeypot the document's own stylesheet cannot
@@ -708,6 +716,78 @@ async function main() {
   );
   await careers.job.close();
 
+  // ── Ashby, and the questions a CV cannot answer ─────────────────────
+  //
+  // Every label on this fixture is copied from a real application. Two of
+  // them found bugs in code that was already shipped, so the checks below
+  // are written against the labels rather than against ids.
+
+  // First: store the answers, through the panel, encrypted. A fill that read
+  // them from anywhere else would pass the checks below for the wrong reason.
+  await page.getByTestId('answer-preferred_name').fill('Ada');
+  await page.getByTestId('answer-preferred_name').blur();
+  await page.getByTestId('answer-notice_period').fill('1 month');
+  await page.getByTestId('answer-notice_period').blur();
+  await page.getByTestId('answer-travel_ok').fill('Yes, up to 25%');
+  await page.getByTestId('answer-travel_ok').blur();
+  await page.getByTestId('answer-security_clearance').fill('None of the above');
+  await page.getByTestId('answer-security_clearance').blur();
+  await page.waitForTimeout(600);
+
+  const ashby = await fillBoard('ashby');
+  const ab = ashby.state.values;
+
+  check('ashby: it never submitted', ashby.state.submits === 0, `${ashby.state.submits} submit(s)`);
+  check(
+    'ashby: the identity fields are filled',
+    ab._systemfield_name === EXPECT.full && ab._systemfield_email === EXPECT.email,
+    JSON.stringify({ name: ab._systemfield_name, email: ab._systemfield_email }),
+  );
+  // The bug Elvis's form exposed: "Preferred Full Name" got the legal name,
+  // because Chromium has no preferred-name type and its FULL_NAME pattern
+  // matches `full.?name`.
+  check(
+    'ashby: the PREFERRED name box gets YOUR preferred name, not the legal one',
+    ab._systemfield_preferred_name === EXPECT.first &&
+      ab._systemfield_preferred_name !== EXPECT.full,
+    `preferred = ${JSON.stringify(ab._systemfield_preferred_name)}`,
+  );
+  // The worse one. The label contains "current employer", so the box asking
+  // when you can start was filled with the name of the company you work for.
+  check(
+    'ashby: the NOTICE box gets your notice period, NOT your employer name',
+    ab.q_notice === '1 month',
+    `notice = ${JSON.stringify(ab.q_notice)}, employer = ${JSON.stringify(ab.q_employer)}`,
+  );
+  check(
+    'ashby: and a real current-employer question is still filled, so the fix is not a blanket refusal',
+    ab.q_employer === EXPECT.employer,
+    `employer = ${JSON.stringify(ab.q_employer)}`,
+  );
+  check(
+    'ashby: a stored answer travelled encrypted from the vault into the form',
+    ab.q_travel === 'Yes, up to 25%' && ab.q_clearance === 'None of the above',
+    JSON.stringify({ travel: ab.q_travel, clearance: ab.q_clearance }),
+  );
+  // Invariant 2, on the questions a real form actually asks.
+  check(
+    'ashby: the work-authorization and sponsorship questions are LEFT EMPTY',
+    (ab.q_eligible ?? '') === '' && (ab.q_sponsorship ?? '') === '',
+    JSON.stringify({ eligible: ab.q_eligible, sponsorship: ab.q_sponsorship }),
+  );
+  check(
+    'ashby: the salary question is left empty AND named as yours to answer',
+    (ab.q_salary ?? '') === '' && /first number spoken/i.test(ashby.review ?? ''),
+    (ashby.review ?? '').split('\n').find((l) => /first number spoken/i.test(l)) ??
+      `(no reason shown; salary = ${JSON.stringify(ab.q_salary)})`,
+  );
+  check(
+    'ashby: pronouns are treated as the sensitive class',
+    (ab.pronouns ?? '') === '',
+    `pronouns = ${JSON.stringify(ab.pronouns)}`,
+  );
+  await ashby.job.close();
+
   // ── Phase 4: a form that hides inside a closed shadow root ──────────
   //
   // This is where the browser API itself is tested. The unit tests drive a
@@ -863,7 +943,7 @@ async function main() {
     JSON.stringify({ permissions: manifest.permissions, hosts: manifest.host_permissions ?? null }),
   );
   check(
-    'the content script is declared for the three supported boards only, in all frames',
+    'the content script is declared for the four supported boards only, in all frames',
     (manifest.content_scripts ?? []).every(
       (c) =>
         c.all_frames === true &&
@@ -873,7 +953,7 @@ async function main() {
         // the check while leaving it looking present. Workday's own entry
         // IS a wildcard, and only over its own apex.
         (c.matches ?? []).every((m) =>
-          /^https:\/\/(jobs\.lever\.co|(job-)?boards\.greenhouse\.io|\*\.myworkdayjobs\.com)\/\*$/.test(
+          /^https:\/\/(jobs\.lever\.co|(job-)?boards\.greenhouse\.io|jobs\.ashbyhq\.com|\*\.myworkdayjobs\.com)\/\*$/.test(
             m,
           ),
         ),
