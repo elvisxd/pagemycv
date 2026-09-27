@@ -191,7 +191,10 @@ describe('selectFromListbox', () => {
 });
 
 describe('applyListboxes', () => {
-  it('counts a selection and passes a failure through with its reason', () => {
+  it('reports an unanswerable dropdown as DECLINED, not as a failure', () => {
+    // The distinction the panel reads. We opened it, read it, and the answer
+    // was not there: that is the extension working, and calling it "failed"
+    // sends somebody hunting for a bug that is not there.
     const container = renderDropdown(['Ireland']);
     const elements = new Map<string, Element>([['lb0', container]]);
     const out = applyListboxes(
@@ -200,7 +203,19 @@ describe('applyListboxes', () => {
       SELECTORS,
     );
     expect(out.selected).toBe(0);
-    expect(out.failures[0]?.detail).toContain('"Spain" was not among the options');
+    expect(out.failures).toEqual([]);
+    expect(out.declined[0]?.detail).toContain('"Spain" was not among the options');
+  });
+
+  it('a menu that lists nothing IS a failure, because something is wrong', () => {
+    const container = renderDropdown([]);
+    const out = applyListboxes(
+      [{ action: 'select', ref: 'lb0', label: 'Country', kind: 'country', value: 'Spain' }],
+      new Map<string, Element>([['lb0', container]]),
+      SELECTORS,
+    );
+    expect(out.declined).toEqual([]);
+    expect(out.failures[0]?.detail).toContain('listed nothing');
   });
 
   it('counts skips without touching the page', () => {
@@ -209,7 +224,7 @@ describe('applyListboxes', () => {
       new Map(),
       SELECTORS,
     );
-    expect(out).toEqual({ selected: 0, skipped: 1, failures: [] });
+    expect(out).toEqual({ selected: 0, skipped: 1, declined: [], failures: [] });
   });
 
   it('treats every dropdown as skipped when the ATS has no contract for them', () => {
@@ -218,6 +233,6 @@ describe('applyListboxes', () => {
       new Map(),
       undefined,
     );
-    expect(out).toEqual({ selected: 0, skipped: 1, failures: [] });
+    expect(out).toEqual({ selected: 0, skipped: 1, declined: [], failures: [] });
   });
 });

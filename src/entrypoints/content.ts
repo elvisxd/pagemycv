@@ -114,6 +114,7 @@ export default defineContentScript({
         selected: dropdowns.selected,
         skipped: report.skipped + dropdowns.skipped,
         failures: [...report.failures, ...dropdowns.failures],
+        declined: dropdowns.declined,
       };
     });
 

@@ -190,7 +190,17 @@ export function applyPlan(
 
   // `selected` is zero here by construction: this path assigns values, it
   // never opens a menu. The caller merges in what applyListboxes did.
-  return { url, ats, filled, attached, selected: 0, skipped, fields: [...fields], failures };
+  return {
+    url,
+    ats,
+    filled,
+    attached,
+    selected: 0,
+    skipped,
+    fields: [...fields],
+    failures,
+    declined: [],
+  };
 }
 
 /**
@@ -290,11 +300,17 @@ export function applyListboxes(
   actions: readonly ListboxAction[],
   elements: Map<string, Element>,
   selectors: ListboxSelectors | undefined,
-): { selected: number; skipped: number; failures: FillReport['failures'] } {
+): {
+  selected: number;
+  skipped: number;
+  declined: FillReport['declined'];
+  failures: FillReport['failures'];
+} {
   let selected = 0;
   let skipped = 0;
+  const declined: FillReport['declined'] = [];
   const failures: FillReport['failures'] = [];
-  if (!selectors) return { selected, skipped: actions.length, failures };
+  if (!selectors) return { selected, skipped: actions.length, declined, failures };
 
   for (const action of actions) {
     if (action.action === 'skip') {
@@ -315,16 +331,24 @@ export function applyListboxes(
       selected++;
       continue;
     }
+    if (result.reason === 'no-match') {
+      // Not a failure. We opened it, read it, and the answer was not there,
+      // so it stays as the person left it and they are told why.
+      declined.push({
+        ref: action.ref,
+        label: action.label,
+        detail: `opened it, and "${action.value}" was not among the options — left as it was`,
+      });
+      continue;
+    }
     failures.push({
       ref: action.ref,
       label: action.label,
       detail:
-        result.reason === 'no-match'
-          ? `opened it, and "${action.value}" was not among the options — left as it was`
-          : result.reason === 'no-options'
-            ? 'opened it and it listed nothing'
-            : 'could not find what opens it',
+        result.reason === 'no-options'
+          ? 'opened it and it listed nothing'
+          : 'could not find what opens it',
     });
   }
-  return { selected, skipped, failures };
+  return { selected, skipped, declined, failures };
 }

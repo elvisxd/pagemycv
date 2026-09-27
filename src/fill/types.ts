@@ -268,6 +268,16 @@ export interface FillReport {
   /** Refs the write step could not complete, with the reason. */
   failures: { ref: string; label: string; detail: string }[];
   /**
+   * Dropdowns that were opened and deliberately left as they were.
+   *
+   * Separate from `failures` because they are not failures. A listbox whose
+   * options do not contain the stored answer is a question for the human,
+   * and the extension declining to guess is it working. Counting that as
+   * "failed" sends somebody looking for a bug in the extension — the same
+   * mistake as the single refusal message Phase 3's review had to split.
+   */
+  declined: { ref: string; label: string; detail: string }[];
+  /**
    * Set when the form was not the page itself but an iframe embedded in it.
    * The user clicked on a company careers page; saying where the values
    * actually went is the difference between trusted and merely convenient.

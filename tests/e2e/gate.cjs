@@ -799,6 +799,22 @@ async function main() {
     (workday.review ?? '').split('\n').find((l) => /not among the options/i.test(l)) ??
       '(no such line)',
   );
+  // And calls it what it is. The first version of this counted a correct
+  // refusal under "failed", which reads as a bug in the extension and sends
+  // somebody looking for one — the same mistake as the single refusal
+  // message Phase 3's review had to split in two.
+  check(
+    'workday: a declined dropdown is NOT reported as a failure',
+    !/1 failed/.test(workday.report ?? ''),
+    (workday.report ?? '').replace(/\n/g, ' '),
+  );
+  // The answered one has to show up somewhere too, or the listbox code's
+  // only success is invisible in the tally.
+  check(
+    'workday: the answered dropdown is counted among the filled',
+    /5\s*filled/.test(workday.report ?? ''),
+    (workday.report ?? '').replace(/\n/g, ' '),
+  );
   await wdPage.close();
 
   // ── The two refusals, which used to be one ──────────────────────────
