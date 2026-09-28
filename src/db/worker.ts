@@ -11,6 +11,7 @@ import { SCREENING_KINDS } from '../fill/types';
 import { parseCvMarkdown } from '../import/cv-markdown';
 import { SENSITIVE_FIELDS } from '../sensitive/registry';
 import { fromBase64, toBase64 } from '../util/base64';
+import { KEY_DOES_NOT_OPEN } from '../vault/convert';
 import {
   checkVerifier,
   decryptValue,
@@ -203,7 +204,7 @@ async function openVault(material: Uint8Array): Promise<VaultState> {
   const candidate = await importKeyMaterial(material);
   if (!(await checkVerifier(candidate, new Uint8Array(row.verifier_enc)))) {
     log('open_failed');
-    throw new Error('the stored key does not open this vault');
+    throw new Error(KEY_DOES_NOT_OPEN);
   }
   key = candidate;
   log('open');

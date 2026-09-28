@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertVault } from '../../src/vault/convert';
+import { convertVault, KEY_DOES_NOT_OPEN, WRONG_PASSPHRASE } from '../../src/vault/convert';
 
 const MATERIAL = new Uint8Array(32).fill(7);
 
@@ -63,5 +63,16 @@ describe('converting a passphrase vault', () => {
     const s = steps();
     await expect(convertVault('', s)).rejects.toThrow(/required/);
     expect(s.order).toEqual([]);
+  });
+
+  it('tells a wrong passphrase apart from a broken worker', async () => {
+    // Same step failing, two different truths. Calling a timeout a wrong
+    // passphrase would have somebody retyping one that was right.
+    const wrongKey = { ...steps(), open: () => Promise.reject(new Error(KEY_DOES_NOT_OPEN)) };
+    await expect(convertVault('typo', wrongKey)).rejects.toThrow(WRONG_PASSPHRASE);
+
+    const timeout = new Error('the database did not answer "open" within 30 seconds');
+    const broken = { ...steps(), open: () => Promise.reject(timeout) };
+    await expect(convertVault('right one', broken)).rejects.toBe(timeout);
   });
 });

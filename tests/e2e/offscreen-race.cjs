@@ -11,10 +11,14 @@
 // regression. Measured by removing the fix and running the gate three times:
 // it failed once and passed twice. This script failed 3 of 3, with 2 to 3 of
 // its 4 panels erroring each time. A guard that fires one run in three is not
-// a guard, so the evidence lives here where it can be re-run deliberately.
+// a guard, so this runs in CI as its own step.
+//
+// It started as spikes/phase-5/race.cjs and moved here once it was the only
+// thing standing behind a fix: a spike is evidence you re-run on purpose, and
+// nobody re-runs it on purpose.
 //
 // Run against a build in .output/chrome-mv3:
-//   pnpm build && node spikes/phase-5/race.cjs
+//   pnpm build && node tests/e2e/offscreen-race.cjs
 //
 // Expected with the fix in place: "4 of 4 panels opened".
 const fs = require('node:fs');
@@ -46,8 +50,9 @@ async function main() {
   const id = sw.url().split('/')[2];
 
   // Straight from a cold service worker into four panels at once, with
-  // nothing in between. Any wait here warms the offscreen document and the
-  // race stops reproducing — which is exactly why the gate misses it.
+  // nothing in between. Keep it that way: this is the version that fails
+  // every time without the fix, and a wait here is the most likely way to
+  // turn it into one that fails some of the time.
   const pages = await Promise.all(Array.from({ length: PANELS }, () => ctx.newPage()));
   await Promise.all(pages.map((p) => p.goto(`chrome-extension://${id}/sidepanel.html`)));
 

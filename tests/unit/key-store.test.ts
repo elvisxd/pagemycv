@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KEY_BYTES, newKeyMaterial } from '../../src/vault/crypto';
-import { hasKeyMaterial, loadKeyMaterial, saveKeyMaterial } from '../../src/vault/key-store';
+import { loadKeyMaterial, saveKeyMaterial } from '../../src/vault/key-store';
 
 /**
  * A stand-in for chrome.storage.local that keeps what it was given, byte for
@@ -35,7 +35,6 @@ describe('the vault key at rest', () => {
 
   it('reports nothing on a profile that has never stored one', async () => {
     expect(await loadKeyMaterial()).toBeNull();
-    expect(await hasKeyMaterial()).toBe(false);
   });
 
   it('survives JSON, which is the failure mode a Uint8Array has here', async () => {

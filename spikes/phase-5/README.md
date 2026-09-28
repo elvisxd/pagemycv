@@ -36,7 +36,7 @@ caught it. The key store lives in the service worker now.
 
 Two contexts ruled out by measurement, one of them the hard way.
 
-## `race.cjs` — the readiness race, on demand
+## The readiness race — now `tests/e2e/offscreen-race.cjs`
 
 `chrome.offscreen.createDocument` resolves before the document's scripts have
 run, so a message sent in that window fails with "Receiving end does not
@@ -46,13 +46,15 @@ worker turned one absorbable message into a sequence that aborts.
 The browser gate does **not** reliably catch a regression here: with the fix
 removed, the gate failed once in three runs and passed twice. `race.cjs`
 failed three times out of three, with two to three of its four panels erroring
-each run. Anything that only fires one run in three is not a guard, so this
-is kept as the reproducer.
+each run. Anything that only fires one run in three is not a guard, so the
+reproducer was promoted out of this folder into `tests/e2e/` and CI runs it
+as its own step.
 
 ```
-pnpm build && node spikes/phase-5/race.cjs
+pnpm build && node tests/e2e/offscreen-race.cjs
 ```
 
 Exits non-zero unless all four panels open. Do not add a wait before the
-panels open: any pause warms the offscreen document and the race stops
-reproducing, which is precisely why the gate misses it.
+panels open. The likely reason the gate misses this is that something warms
+the offscreen document before its panels open — likely, not measured. What
+was measured is the one-in-three, and that is enough to know which to trust.

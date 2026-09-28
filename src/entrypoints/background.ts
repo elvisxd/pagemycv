@@ -31,6 +31,7 @@ import { fromBase64, toBase64 } from '../util/base64';
 import { convertVault } from '../vault/convert';
 import { deriveKeyMaterial, newKeyMaterial } from '../vault/crypto';
 import { loadKeyMaterial, saveKeyMaterial } from '../vault/key-store';
+import { createOpener } from '../vault/open';
 
 const OFFSCREEN_PATH = 'offscreen.html';
 
@@ -304,64 +305,18 @@ async function fillActiveTab(): Promise<FillReport> {
 }
 
 /**
- * The open, in flight or done.
- *
- * Memoized because it WRITES. Two panels opening at once would otherwise both
- * see an absent vault and both create one, and the second would win with a
- * key the first one's rows are not encrypted under. The gate opens four at
- * once for exactly this reason.
- *
- * Not cached across a service worker restart, which is correct rather than
- * merely tolerable: a new service worker cannot know whether the offscreen
- * document it is talking to still holds the key, so it asks again. Opening an
- * already-open vault is a state() call and nothing else.
+ * The open. The logic is in src/vault/open.ts, where it can be tested; this
+ * entrypoint can be imported by nothing. See that file for why only the
+ * in-flight open is shared and a finished one is forgotten.
  */
-let opening: Promise<void> | null = null;
-
-async function openVault(): Promise<void> {
-  const state = await sendDb('db:state', undefined);
-  if (state.status === 'unavailable' || state.status === 'unlocked') return;
-
-  if (state.status === 'absent') {
-    // Generated here, where it can be stored, and STORED BEFORE the vault is
-    // created. A key the worker encrypted a vault under and we then failed to
-    // persist would leave that vault unopenable forever; a stored key with no
-    // vault behind it is just an unused value the next create overwrites.
-    const material = newKeyMaterial();
-    await saveKeyMaterial(material);
-    await sendDb('db:create', { material: toBase64(material) });
-    return;
-  }
-
-  // Made with a passphrase and not yet converted. The panel asks once; there
-  // is nothing this can do without it.
-  if (state.status === 'needs_passphrase') return;
-
-  const material = await loadKeyMaterial();
-  if (!material) {
-    // The vault says it needs no passphrase and its key is not here. Saying
-    // so is the only honest answer: creating a new one would write over a CV
-    // that is still on disk, and reporting "locked" would ask for a
-    // passphrase that was never set.
-    throw new Error(
-      'the vault exists but its key is not in this browser profile, so it cannot be opened',
-    );
-  }
-  await sendDb('db:open', { material: toBase64(material) });
-}
-
-function ensureVaultOpen(): Promise<void> {
-  if (!opening) {
-    opening = openVault().catch((err) => {
-      // Never cache the failure. A worker that timed out mid-open would
-      // otherwise stay broken until this service worker is torn down, and the
-      // panel's "Try again" would be a button that cannot work.
-      opening = null;
-      throw err;
-    });
-  }
-  return opening;
-}
+const ensureVaultOpen = createOpener({
+  state: () => sendDb('db:state', undefined),
+  newMaterial: newKeyMaterial,
+  load: loadKeyMaterial,
+  save: saveKeyMaterial,
+  create: (material) => sendDb('db:create', { material: toBase64(material) }),
+  open: (material) => sendDb('db:open', { material: toBase64(material) }),
+});
 
 /** The one-time move off a passphrase. The order is in src/vault/convert.ts. */
 function convert(passphrase: string): Promise<VaultState> {

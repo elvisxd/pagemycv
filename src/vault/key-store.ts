@@ -48,8 +48,3 @@ export async function saveKeyMaterial(material: Uint8Array): Promise<void> {
   }
   await chrome.storage.local.set({ [STORAGE_KEY]: Array.from(material) satisfies Stored });
 }
-
-/** True when this browser profile already holds a key. */
-export async function hasKeyMaterial(): Promise<boolean> {
-  return (await loadKeyMaterial()) !== null;
-}
