@@ -23,6 +23,12 @@ same browser profile, so a copy of the *profile* is not. That trade is
 deliberate and written up in
 [`03-security.md`](docs/03-security.md#what-dropping-the-passphrase-cost).
 
+**Back it up.** Removing the extension deletes the vault and its key. The
+panel's *Backup* section exports everything you entered to one file and
+restores it into this browser or a new one. The file is not encrypted — see
+[`05-data.md`](docs/05-data.md#backup-and-portability) for why, and for the
+test that forces that decision to be revisited.
+
 | | |
 |---|---|
 | Sensitive fields filled automatically | **zero**, by construction |

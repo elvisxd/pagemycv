@@ -3,6 +3,7 @@
 //
 // Keys are prefixed 'db:' so they cannot be confused with the 'vault:' channel.
 import { defineExtensionMessaging } from '@webext-core/messaging';
+import type { Backup } from '../backup/format';
 import type { ProfileView, ResumeMeta, VaultState } from '../db/schema';
 import type { FillValues, ResumeFile, ScreeningAnswers } from '../fill/types';
 
@@ -39,6 +40,10 @@ export interface DbProtocol {
     meta: ResumeMeta;
   };
   'db:resumeMeta'(): ResumeMeta | null;
+  /** Everything a person entered, decrypted. See src/backup/format.ts. */
+  'db:exportBackup'(): Backup;
+  /** Replace the vault's contents with a backup file's text. All or nothing. */
+  'db:importBackup'(data: { text: string }): { restored: true; counts: Record<string, number> };
   /** Your own answers to the screening questions, decrypted. */
   'db:screeningAnswers'(): ScreeningAnswers;
   /** Store one. An empty answer deletes it rather than storing a blank. */

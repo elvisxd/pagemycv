@@ -6,6 +6,13 @@
 // cannot host this: it has neither that API nor the Worker constructor needed
 // to delegate. Both were confirmed in a real browser, see spikes/phase-0.
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import {
+  BACKUP_FORMAT,
+  BACKUP_VERSION,
+  type Backup,
+  BackupError,
+  parseBackup,
+} from '../backup/format';
 import type { FieldKind, FillValues, ResumeFile, ScreeningAnswers } from '../fill/types';
 import { SCREENING_KINDS } from '../fill/types';
 import { parseCvMarkdown } from '../import/cv-markdown';
@@ -434,24 +441,34 @@ const RESUME_TYPES: Readonly<Record<string, string>> = {
   'text/plain': 'txt',
 };
 
+/**
+ * The rules a stored résumé has to meet, wherever it came from. Shared with
+ * the restore on purpose: a backup file is just another way in, and a rule
+ * that only the upload button enforces is a rule a hand-edited backup skips.
+ */
+function resumeProblem(mimeType: string, base64: string): string | null {
+  if (!RESUME_TYPES[mimeType]) {
+    return `${mimeType || 'that file type'} is not accepted. Use a PDF, a Word document, or plain text.`;
+  }
+  // Measured on the decoded length, not the base64 length, so the limit means
+  // what it says.
+  const bytes = Math.floor((base64.length * 3) / 4);
+  if (bytes === 0) return 'that file is empty';
+  if (bytes > MAX_RESUME_BYTES) {
+    return `that file is ${Math.round(bytes / 1024 / 1024)} MB; the limit is 8 MB`;
+  }
+  return null;
+}
+
 async function setResume(
   filename: string,
   mimeType: string,
   base64: string,
 ): Promise<{ stored: true; meta: ResumeMeta }> {
   const vaultKey = requireKey();
-  if (!RESUME_TYPES[mimeType]) {
-    throw new Error(
-      `${mimeType || 'that file type'} is not accepted. Use a PDF, a Word document, or plain text.`,
-    );
-  }
-  // Measured on the decoded length, not the base64 length, so the limit means
-  // what it says.
+  const problem = resumeProblem(mimeType, base64);
+  if (problem) throw new Error(problem);
   const bytes = Math.floor((base64.length * 3) / 4);
-  if (bytes === 0) throw new Error('that file is empty');
-  if (bytes > MAX_RESUME_BYTES) {
-    throw new Error(`that file is ${Math.round(bytes / 1024 / 1024)} MB; the limit is 8 MB`);
-  }
   // The bytes are encrypted as their base64 text rather than as a BLOB. That
   // keeps crypto.ts's surface to the one string-in, string-out door the
   // security doc pins, and the 33% it costs on disk is not worth widening it.
@@ -621,6 +638,278 @@ async function setScreeningAnswer(kind: string, answer: string): Promise<{ saved
   return { saved: true };
 }
 
+const CONTACT_COLUMNS = [
+  ['email', 'email_enc'],
+  ['phone', 'phone_enc'],
+  ['addressLine1', 'address_line1_enc'],
+  ['addressLine2', 'address_line2_enc'],
+  ['city', 'city_enc'],
+  ['postalCode', 'postal_code_enc'],
+] as const;
+
+/**
+ * Everything a person entered, decrypted, as one object. The panel turns it
+ * into a file; nothing here writes anywhere.
+ *
+ * Read with one key reference throughout, so a single export cannot mix
+ * values decrypted under two different keys.
+ */
+async function exportBackup(): Promise<Backup> {
+  const vaultKey = requireKey();
+  const p = rows<{
+    legal_first: string;
+    legal_last: string;
+    preferred_name: string | null;
+    headline: string | null;
+    summary: string | null;
+    locale: string;
+  }>(
+    'SELECT legal_first, legal_last, preferred_name, headline, summary, locale FROM profile WHERE id = 1',
+  )[0];
+
+  const c = rows<Record<string, unknown>>('SELECT * FROM contact WHERE id = 1')[0];
+  let contact: Backup['contact'] = null;
+  if (c) {
+    const open = async (column: string): Promise<string | null> => {
+      const blob = c[column];
+      return blob
+        ? decryptValue(vaultKey, new Uint8Array(blob as Uint8Array), 'contact:1', column)
+        : null;
+    };
+    const values: Record<string, string | null> = {};
+    for (const [field, column] of CONTACT_COLUMNS) values[field] = await open(column);
+    contact = {
+      email: values.email ?? null,
+      phone: values.phone ?? null,
+      addressLine1: values.addressLine1 ?? null,
+      addressLine2: values.addressLine2 ?? null,
+      city: values.city ?? null,
+      region: (c.region as string | null) ?? null,
+      postalCode: values.postalCode ?? null,
+      country: String(c.country ?? 'US'),
+    };
+  }
+
+  const work = rows<{
+    employer: string;
+    title: string;
+    location: string | null;
+    is_remote: number;
+    started_on: string;
+    ended_on: string | null;
+    description: string | null;
+  }>(
+    'SELECT employer, title, location, is_remote, started_on, ended_on, description FROM work_history ORDER BY sort_order',
+  ).map((w) => ({
+    employer: w.employer,
+    title: w.title,
+    location: w.location,
+    isRemote: w.is_remote === 1,
+    startedOn: w.started_on,
+    endedOn: w.ended_on,
+    description: w.description,
+  }));
+
+  const education = rows<{
+    institution: string;
+    degree: string | null;
+    field: string | null;
+    started_on: string | null;
+    ended_on: string | null;
+  }>(
+    'SELECT institution, degree, field, started_on, ended_on FROM education ORDER BY sort_order',
+  ).map((e) => ({
+    institution: e.institution,
+    degree: e.degree,
+    field: e.field,
+    startedOn: e.started_on,
+    endedOn: e.ended_on,
+  }));
+
+  const links = rows<{ kind: string; url: string }>(
+    'SELECT kind, url FROM link ORDER BY sort_order',
+  ).map((l) => ({ kind: l.kind, url: l.url }));
+
+  const resume = await readResume(vaultKey);
+  const screeningAnswers = (await readScreeningAnswers()) as Record<string, string>;
+
+  log('export_backup', `${work.length} roles, ${education.length} degrees`);
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: new Date(now()).toISOString(),
+    profile: p
+      ? {
+          legalFirst: p.legal_first,
+          legalLast: p.legal_last,
+          preferredName: p.preferred_name,
+          headline: p.headline,
+          summary: p.summary,
+          locale: p.locale,
+        }
+      : null,
+    contact,
+    work,
+    education,
+    links,
+    resume,
+    screeningAnswers,
+  };
+}
+
+/**
+ * Replace the vault's contents with a backup's. All of it or none of it.
+ *
+ * REPLACE rather than merge, because a merge has no answer for "the backup
+ * has no résumé and the vault does": keeping it would make the restore
+ * depend on what happened to be there, and the point of restoring is that
+ * afterwards the vault is exactly the file.
+ */
+async function importBackup(
+  text: string,
+): Promise<{ restored: true; counts: Record<string, number> }> {
+  const vaultKey = requireKey();
+  let backup: Backup;
+  try {
+    backup = parseBackup(text);
+  } catch (err) {
+    // Refused before anything is read, encrypted or deleted.
+    throw err instanceof BackupError ? new Error(err.message) : err;
+  }
+  if (backup.resume) {
+    const problem = resumeProblem(backup.resume.mimeType, backup.resume.base64);
+    if (problem) throw new Error(`the résumé in that backup cannot be restored: ${problem}`);
+  }
+
+  // Everything encrypted BEFORE the transaction opens, as importCv does: an
+  // await between BEGIN and COMMIT would leave the transaction open to any
+  // command that ran in the meantime.
+  const contactEnc: Record<string, Uint8Array | null> = {};
+  if (backup.contact) {
+    for (const [field, column] of CONTACT_COLUMNS) {
+      const value = backup.contact[field];
+      contactEnc[column] = value ? await encryptValue(vaultKey, value, 'contact:1', column) : null;
+    }
+  }
+  const resumeEnc = backup.resume
+    ? await encryptValue(vaultKey, backup.resume.base64, `document:${RESUME_ID}`, 'bytes_enc')
+    : null;
+  const answersEnc: [string, Uint8Array][] = [];
+  for (const [kind, answer] of Object.entries(backup.screeningAnswers)) {
+    const trimmed = answer.trim();
+    if (trimmed) {
+      answersEnc.push([
+        kind,
+        await encryptValue(vaultKey, trimmed, `screening:${kind}`, 'answer_enc'),
+      ]);
+    }
+  }
+
+  const t = now();
+  db.exec('BEGIN');
+  try {
+    for (const table of [
+      'profile',
+      'contact',
+      'work_history',
+      'education',
+      'link',
+      'screening_answer',
+    ]) {
+      db.exec(`DELETE FROM ${table}`);
+    }
+    db.exec({ sql: "DELETE FROM document WHERE kind = 'resume'" });
+
+    const p = backup.profile;
+    if (p) {
+      db.exec({
+        sql: `INSERT INTO profile (id, legal_first, legal_last, preferred_name, headline, summary, locale, created_at, updated_at)
+              VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [p.legalFirst, p.legalLast, p.preferredName, p.headline, p.summary, p.locale, t, t],
+      });
+    }
+    const c = backup.contact;
+    if (c) {
+      db.exec({
+        sql: `INSERT INTO contact (id, email_enc, phone_enc, address_line1_enc, address_line2_enc, city_enc, region, postal_code_enc, country, created_at, updated_at)
+              VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [
+          contactEnc.email_enc ?? null,
+          contactEnc.phone_enc ?? null,
+          contactEnc.address_line1_enc ?? null,
+          contactEnc.address_line2_enc ?? null,
+          contactEnc.city_enc ?? null,
+          c.region,
+          contactEnc.postal_code_enc ?? null,
+          c.country,
+          t,
+          t,
+        ],
+      });
+    }
+    backup.work.forEach((w, i) => {
+      db.exec({
+        sql: `INSERT INTO work_history (id, employer, title, location, is_remote, started_on, ended_on, description, sort_order, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [
+          uid(),
+          w.employer,
+          w.title,
+          w.location,
+          w.isRemote ? 1 : 0,
+          w.startedOn,
+          w.endedOn,
+          w.description,
+          i,
+          t,
+          t,
+        ],
+      });
+    });
+    backup.education.forEach((e, i) => {
+      db.exec({
+        sql: `INSERT INTO education (id, institution, degree, field, started_on, ended_on, sort_order, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [uid(), e.institution, e.degree, e.field, e.startedOn, e.endedOn, i, t, t],
+      });
+    });
+    backup.links.forEach((l, i) => {
+      db.exec({
+        sql: 'INSERT INTO link (id, kind, url, sort_order) VALUES (?, ?, ?, ?)',
+        bind: [uid(), l.kind, l.url, i],
+      });
+    });
+    if (backup.resume && resumeEnc) {
+      db.exec({
+        sql: `INSERT INTO document (id, kind, filename, mime_type, bytes_enc, is_default, created_at)
+              VALUES (?, 'resume', ?, ?, ?, 1, ?)`,
+        bind: [RESUME_ID, backup.resume.filename, backup.resume.mimeType, resumeEnc, t],
+      });
+    }
+    for (const [kind, enc] of answersEnc) {
+      db.exec({
+        sql: 'INSERT INTO screening_answer (kind, answer_enc, updated_at) VALUES (?, ?, ?)',
+        bind: [kind, enc, t],
+      });
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {}
+    throw err;
+  }
+  const counts = {
+    work: backup.work.length,
+    education: backup.education.length,
+    links: backup.links.length,
+    answers: answersEnc.length,
+    resume: backup.resume ? 1 : 0,
+  };
+  log('import_backup', JSON.stringify(counts));
+  return { restored: true, counts };
+}
+
 const handlers: Record<string, (payload: Record<string, string>) => Promise<unknown>> = {
   async state() {
     await openDatabase();
@@ -663,6 +952,14 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
   async setResume({ filename, mimeType, base64 }) {
     await openDatabase();
     return setResume(filename ?? '', mimeType ?? '', base64 ?? '');
+  },
+  async exportBackup() {
+    await openDatabase();
+    return exportBackup();
+  },
+  async importBackup({ text }) {
+    await openDatabase();
+    return importBackup(text ?? '');
   },
   async resumeMeta() {
     await openDatabase();

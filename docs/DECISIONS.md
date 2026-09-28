@@ -123,6 +123,10 @@ forced by evidence rather than by taste.
 | **Converting an old vault** | **Store the key the passphrase already derives; re-encrypt nothing** | The alternative was re-encrypting every column under a new key, which is a migration that can stop halfway and leave rows readable under two different keys. Changing where the key comes from cannot half-finish. |
 | **Auto-lock and the Lock button** | **Both removed** | With the key on disk, locking would clear it from memory and the next call would silently read it back. A control that undoes itself is worse than no control, because it tells you the CV is protected while it is not. |
 
+| **Backup file** | **Plain JSON, no passphrase** | Asked, and chosen. What it can hold today is the CV, the résumé and the screening answers, because no code sets a sensitive value. A passphrase would make a forgotten passphrase a lost backup. `tests/unit/backup-coverage.test.ts` fails the day sensitive values become settable, so this cannot outlive its reason silently. |
+| **Restore semantics** | **Replace, in one transaction** | A merge has no answer for "the file has no résumé and the vault does". After a restore the vault is exactly the file. |
+| **Which tables a backup covers** | **Every table decided, by a test** | Adding a table to a migration reminds nobody to add it to the backup. The coverage test is that reminder: every table is backed up or excluded with a written reason. |
+
 ## Still open
 
 One thing, and it is the only one that could still change the shape of the

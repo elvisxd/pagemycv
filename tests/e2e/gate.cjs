@@ -29,6 +29,11 @@ const EXT = path.join(__dirname, '../../.output/chrome-mv3');
  * seen, from a stray manual run alongside a stability loop.
  */
 const PROFILE = path.join(__dirname, `../../.e2e-profile-${process.pid}`);
+// A second, empty profile: the extension removed and installed again, which
+// is the case a backup exists for. Restoring into the profile that made the
+// backup would prove much less, because everything is still there.
+const FRESH_PROFILE = path.join(__dirname, `../../.e2e-profile-fresh-${process.pid}`);
+const BACKUP_FILE = path.join(__dirname, `../../.e2e-backup-${process.pid}.json`);
 
 // The real CV when this checkout sits next to Byte, otherwise a fixture with
 // the same shape. The gate must not depend on one person's filesystem.
@@ -131,8 +136,8 @@ function check(name, pass, detail) {
   if (!pass) failures++;
 }
 
-async function launch() {
-  const ctx = await chromium.launchPersistentContext(PROFILE, {
+async function launch(profile = PROFILE) {
+  const ctx = await chromium.launchPersistentContext(profile, {
     // 'chromium' selects the full browser. The default headless shell cannot
     // load extensions at all, so without this the service worker never starts
     // and every check below times out waiting for it.
@@ -886,6 +891,125 @@ async function main() {
     JSON.stringify((manifest.content_scripts ?? []).map((c) => c.matches)),
   );
 
+  // ── Backup: export here, restore into a brand-new profile ───────────
+  //
+  // Everything above left this vault holding the fixture CV, a résumé file
+  // and four screening answers, so the backup has something of each kind.
+  await page.bringToFront();
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.getByRole('button', { name: 'Export backup' }).click(),
+  ]);
+  await download.saveAs(BACKUP_FILE);
+  const backupText = fs.readFileSync(BACKUP_FILE, 'utf8');
+  const backup = JSON.parse(backupText);
+  check(
+    'backup: it downloads as a file named for its date',
+    /^pagemycv-backup-\d{4}-\d{2}-\d{2}\.json$/.test(download.suggestedFilename()),
+    download.suggestedFilename(),
+  );
+  check(
+    'backup: it holds the CV, the résumé and the answers',
+    backup.profile?.legalLast === EXPECT.last &&
+      backup.contact?.email === EXPECT.email &&
+      backup.resume?.filename === RESUME_NAME &&
+      backup.screeningAnswers?.notice_period === '1 month',
+    JSON.stringify({
+      last: backup.profile?.legalLast,
+      email: backup.contact?.email,
+      resume: backup.resume?.filename,
+      notice: backup.screeningAnswers?.notice_period,
+    }),
+  );
+  check(
+    'backup: the résumé inside is byte for byte the one uploaded',
+    Buffer.from(backup.resume?.base64 ?? '', 'base64').equals(RESUME_BYTES),
+  );
+  // Nothing sensitive can be stored yet, and this file is not encrypted.
+  // tests/unit/backup-coverage.test.ts holds that line in the code; this
+  // holds it in the file that actually came out.
+  check(
+    'backup: it carries no sensitive-value section at all',
+    !('sensitive' in backup) && !/sensitive_value|value_enc/.test(backupText),
+  );
+
+  // A damaged file is refused before anything changes. Built from the REAL
+  // backup with one field broken: a hand-written stub was missing half its
+  // fields and got refused for one of those instead, which proved refusal
+  // but not the reason the check is named for.
+  await page.setInputFiles('[data-testid="backup-file"]', {
+    name: 'damaged.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ ...backup, work: 'not a list' })),
+  });
+  const damaged = await page
+    .getByRole('alert')
+    .innerText({ timeout: 30000 })
+    .catch(() => '(no message)');
+  check(
+    'backup: a damaged file is refused, saying nothing changed',
+    /^work should be a list/.test(damaged) &&
+      /nothing was changed/i.test(damaged) &&
+      (await page.getByTestId('backup-confirm').count()) === 0,
+    damaged,
+  );
+  check(
+    'backup: and the vault is exactly as it was',
+    (await page.locator('body').innerText()).includes(EXPECT.employer),
+  );
+
+  await ctx.close();
+
+  // The extension is gone and installed again: a new profile, a new vault,
+  // a NEW random key. Every encrypted column in the file has to be sealed
+  // again under a key that did not exist when it was exported.
+  fs.rmSync(FRESH_PROFILE, { recursive: true, force: true });
+  ({ ctx, id } = await launch(FRESH_PROFILE));
+  page = await ctx.newPage();
+  await page.goto(`chrome-extension://${id}/sidepanel.html`);
+  await page.getByRole('button', { name: /Import your CV/ }).waitFor({ timeout: 60000 });
+  check(
+    'restore: the fresh profile really starts empty',
+    !(await page.locator('body').innerText()).includes(EXPECT.employer),
+  );
+
+  await page.setInputFiles('[data-testid="backup-file"]', BACKUP_FILE);
+  await page.getByTestId('backup-confirm').waitFor({ timeout: 30000 });
+  const confirmText = await page.getByTestId('backup-confirm').innerText();
+  check(
+    'restore: choosing the file asks first, naming whose backup it is',
+    confirmText.includes(EXPECT.last) &&
+      !(await page.locator('body').innerText()).includes(EXPECT.employer),
+    confirmText.slice(0, 120),
+  );
+
+  await page.getByRole('button', { name: 'Replace and restore' }).click();
+  await page.getByTestId('backup-result').waitFor({ timeout: 60000 });
+  const restoredBody = await page.locator('body').innerText();
+  check(
+    'restore: the CV, the résumé and the answers are back',
+    restoredBody.includes(EXPECT.employer) &&
+      restoredBody.includes(RESUME_NAME) &&
+      (await page.getByTestId('answer-notice_period').inputValue()) === '1 month' &&
+      (await page.getByTestId('answer-preferred_name').inputValue()) === 'Ada',
+    (await page.getByTestId('backup-result').innerText()).slice(0, 120),
+  );
+
+  // Shown on screen is not the same as usable. A real form, filled from the
+  // restored vault: email and phone come out of encrypted columns, and the
+  // résumé has to reach the file input byte for byte.
+  const again = await fillBoard('lever');
+  const av = again.state.values;
+  check(
+    'restore: the restored vault fills a real form, résumé attached',
+    av.email === EXPECT.email &&
+      av.phone === EXPECT.phone &&
+      av.org === EXPECT.employer &&
+      again.state.fileSize === RESUME_BYTES.length,
+    JSON.stringify({ email: av.email, phone: av.phone, org: av.org, bytes: again.state.fileSize }),
+  );
+  await again.job.close();
+
   await ctx.close();
 
   check(
@@ -919,5 +1043,7 @@ main()
   .finally(async () => {
     for (const ctx of opened) await ctx.close().catch(() => {});
     fs.rmSync(PROFILE, { recursive: true, force: true });
+    fs.rmSync(FRESH_PROFILE, { recursive: true, force: true });
+    fs.rmSync(BACKUP_FILE, { force: true });
     process.exit(failures === 0 ? 0 : 1);
   });

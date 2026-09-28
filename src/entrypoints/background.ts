@@ -335,6 +335,8 @@ const ROUTES: Record<keyof VaultProtocol, keyof DbProtocol | 'local'> = {
   'vault:profile': 'db:profile',
   'vault:importCv': 'db:importCv',
   'vault:resumeMeta': 'db:resumeMeta',
+  'vault:exportBackup': 'db:exportBackup',
+  'vault:importBackup': 'db:importBackup',
   'vault:setResume': 'db:setResume',
   'vault:screeningAnswers': 'db:screeningAnswers',
   'vault:setScreeningAnswer': 'db:setScreeningAnswer',
