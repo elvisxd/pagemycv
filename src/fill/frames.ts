@@ -32,7 +32,11 @@ export interface FrameChoice {
  * second run is worse than one that refuses.
  */
 export function chooseFrame(frames: readonly FrameReport[]): FrameChoice | null {
-  const candidates = frames.filter((f) => f.fields > 0 && atsForUrl(f.url).id !== 'unknown');
+  // Any frame with fillable controls. This used to also require a known
+  // ATS, which made "a site we have not named" indistinguishable from "no
+  // form here"; an unknown site is a definition now (see the registry), so
+  // the frame is chosen on what it holds, not on whose it is.
+  const candidates = frames.filter((f) => f.fields > 0);
   if (candidates.length === 0) return null;
 
   const ranked = [...candidates].sort((a, b) => {

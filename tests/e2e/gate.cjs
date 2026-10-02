@@ -66,6 +66,8 @@ const FIXTURE_ORIGINS = [
   'https://boards.greenhouse.io',
   'https://careers.acme.test',
   'https://jobs.ashbyhq.com',
+  // The generic fixture: a declared host with an empty map. See BOARDS.generic.
+  'https://apply.workable.com',
 ];
 
 const BOARDS = {
@@ -111,6 +113,15 @@ const BOARDS = {
   ashby: {
     url: 'https://jobs.ashbyhq.com/npx/a367c10e-7fa8-4276-bf76-19252af8787c/application',
     file: path.join(__dirname, '../fixtures/ashby.html'),
+  },
+  // A form with no field name any map knows, on a declared host whose map is
+  // empty. What it measures is the standards-based passes carrying a form on
+  // their own — which is all PageMyCV has on a site nobody has named. The
+  // declared host is what gets the content script there; on an unknown host
+  // that part needs a click the gate cannot make (spikes/phase-6).
+  generic: {
+    url: 'https://apply.workable.com/acme/j/A1B2C3D4E5/apply/',
+    file: path.join(__dirname, '../fixtures/generic.html'),
   },
 };
 
@@ -832,6 +843,72 @@ async function main() {
   );
   await ashby.job.close();
 
+  // ── A form no map knows ─────────────────────────────────────────────
+  //
+  // The fixture CV is loaded and the screening answers from the Ashby block
+  // are still stored, so every kind of source is in play: CV columns,
+  // encrypted contact columns, the résumé, an answer the person typed.
+  const generic = await fillBoard('generic');
+  const un = generic.state.values;
+  check(
+    'generic: it never submitted',
+    generic.state.submits === 0,
+    `${generic.state.submits} submit(s)`,
+  );
+  check(
+    'generic: name, email and phone fill from labels alone, no map',
+    un['candidate[firstname]'] === EXPECT.first &&
+      un['candidate[lastname]'] === EXPECT.last &&
+      un['candidate[mail]'] === EXPECT.email &&
+      un['candidate[tel]'] === EXPECT.phone,
+    JSON.stringify({
+      first: un['candidate[firstname]'],
+      last: un['candidate[lastname]'],
+      mail: un['candidate[mail]'],
+      tel: un['candidate[tel]'],
+    }),
+  );
+  check(
+    'generic: employer, title and links fill from the label rules',
+    un['candidate[employer_now]'] === EXPECT.employer &&
+      un['candidate[social_1]'] === EXPECT.linkedin &&
+      un['candidate[social_2]'] === EXPECT.github,
+    JSON.stringify({
+      employer: un['candidate[employer_now]'],
+      li: un['candidate[social_1]'],
+      gh: un['candidate[social_2]'],
+    }),
+  );
+  check(
+    'generic: the résumé is attached, bytes intact',
+    un['candidate[attachment]'] === RESUME_NAME && generic.state.fileSize === RESUME_BYTES.length,
+    `${un['candidate[attachment]']} ${generic.state.fileSize} of ${RESUME_BYTES.length} bytes`,
+  );
+  // The three refusals that must survive the absence of a map: a question
+  // nobody answered, the sensitive class, and the trap.
+  check(
+    'generic: a screening question with no stored answer is left for you',
+    (un['candidate[q_source]'] ?? '') === '',
+    `"${un['candidate[q_source]']}"`,
+  );
+  check(
+    'generic: the work-authorisation question is refused as sensitive, not filled as a country',
+    (un['candidate[q_auth]'] ?? '') === '',
+    `"${un['candidate[q_auth]']}"`,
+  );
+  check('generic: the cover letter is never written', (un['candidate[letter]'] ?? '') === '');
+  check(
+    'generic: the off-screen unlabelled `website` is refused',
+    (un.website ?? '') === '',
+    `"${un.website}"`,
+  );
+  check(
+    'generic: the panel names the board, not "this page"',
+    /Workable/.test(generic.review ?? generic.report ?? ''),
+    (generic.review ?? generic.report ?? '').slice(0, 120),
+  );
+  await generic.job.close();
+
   // ── The two refusals, which used to be one ──────────────────────────
   //
   // A board page with no form, and a page with no content script at all, are
@@ -845,10 +922,18 @@ async function main() {
   );
   await listing.job.close();
 
+  // A page with no content script is no longer "not a job board". It is a
+  // page the person has not yet pointed the extension at: the background
+  // tries to inject, Chrome refuses because the gate cannot click the icon,
+  // and THAT refusal — real, from Chrome — is what becomes the message. This
+  // is as far along the on-demand path as CI can get.
   const plain = await fillBoard('plainPage');
   check(
-    'a page with no content script is refused with a DIFFERENT reason',
-    /does not know this page/i.test(plain.failed ?? ''),
+    'a page with no content script says how to grant it, naming the boards that need no grant',
+    /click the PageMyCV icon in the toolbar/i.test(plain.failed ?? '') &&
+      /Lever/.test(plain.failed ?? '') &&
+      /Workable/.test(plain.failed ?? '') &&
+      !/does not know this page/i.test(plain.failed ?? ''),
     plain.failed ?? '(it filled something)',
   );
   // The regression this measures: spending the LONG retry budget on a page
@@ -873,9 +958,19 @@ async function main() {
   check(
     'the manifest still requests NO host permissions, embedded case included',
     manifest.host_permissions === undefined &&
+      manifest.optional_host_permissions === undefined &&
       !(manifest.permissions ?? []).includes('webNavigation') &&
       !(manifest.permissions ?? []).includes('tabs'),
     JSON.stringify({ permissions: manifest.permissions, hosts: manifest.host_permissions ?? null }),
+  );
+  // activeTab is the whole of what unknown sites get: one tab, after a
+  // click, until navigation. It is asserted present so that removing it by
+  // accident fails here rather than on the first unknown site somebody tries.
+  check(
+    'the manifest asks for activeTab and scripting, which is what unknown sites run on',
+    (manifest.permissions ?? []).includes('activeTab') &&
+      (manifest.permissions ?? []).includes('scripting'),
+    JSON.stringify(manifest.permissions),
   );
   check(
     'the content script is declared for the supported boards only, in all frames',
@@ -883,7 +978,7 @@ async function main() {
       (c) =>
         c.all_frames === true &&
         (c.matches ?? []).every((m) =>
-          /^https:\/\/(jobs\.lever\.co|(job-)?boards\.greenhouse\.io|jobs\.ashbyhq\.com)\/\*$/.test(
+          /^https:\/\/(jobs\.lever\.co|(job-)?boards\.greenhouse\.io|jobs\.ashbyhq\.com|apply\.workable\.com|(careers|jobs)\.smartrecruiters\.com|jobs\.jobvite\.com)\/\*$/.test(
             m,
           ),
         ),

@@ -101,6 +101,18 @@ it in a real browser. `match_about_blank` does not widen this — an about:blank
 or srcdoc frame inherits its parent's origin, and one under an origin we do
 not match is not injected.
 
+**And on a site nobody has named, the reach is one tab.** Anywhere outside
+the declared boards, the same content script is injected into the active tab
+under `activeTab` — granted by the person clicking the extension's icon on
+that tab, and gone when they leave it. Nothing is stored, no site is
+remembered, and `src/fill/inject.ts` is the only module the guard lets call
+`chrome.scripting`. The injection is the one line in the fill path the gate
+cannot exercise — every route to that grant was measured in `spikes/phase-6`
+and none can be driven headlessly — so the gate exercises everything around
+it instead: the classifier on a form with no recognisable field names, the
+decision to inject (a module with fakes), and Chrome's own refusal, which is
+real in CI and is what becomes the "click the icon" message.
+
 **And re-checked at the moment of writing.** A plan crosses two message hops
 before it is executed, and a framework can reuse a DOM node while changing its
 attributes, so an element reference can still be live and no longer be the

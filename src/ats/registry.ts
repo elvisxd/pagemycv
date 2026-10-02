@@ -7,7 +7,14 @@
 // field on its own that the other passes could not reach.
 import type { FieldKind } from '../fill/types';
 
-export type AtsId = 'lever' | 'greenhouse' | 'ashby' | 'unknown';
+export type AtsId =
+  | 'lever'
+  | 'greenhouse'
+  | 'ashby'
+  | 'workable'
+  | 'smartrecruiters'
+  | 'jobvite'
+  | 'unknown';
 
 export interface AtsDefinition {
   id: AtsId;
@@ -85,8 +92,50 @@ const ASHBY: AtsDefinition = {
   },
 };
 
-export const ATS_DEFINITIONS: readonly AtsDefinition[] = [LEVER, GREENHOUSE, ASHBY];
+// The three below carry NO field map on purpose. Their hosts are documented
+// in docs/09-ats.md; their forms are not, and a map written from guesswork
+// is a hypothesis wearing the confidence score of a fact. With an empty map
+// pass 2 contributes nothing and the standards-based passes — autocomplete,
+// Chromium's patterns, our label rules — carry the form, which is exactly
+// what happens on a site nobody has named. Declaring the host buys one thing:
+// the content script is already there, so an application embedded in a
+// company careers page fills without the person clicking the icon first.
+const WORKABLE: AtsDefinition = {
+  id: 'workable',
+  label: 'Workable',
+  hosts: ['apply.workable.com'],
+  fields: {},
+};
 
+const SMARTRECRUITERS: AtsDefinition = {
+  id: 'smartrecruiters',
+  label: 'SmartRecruiters',
+  hosts: ['careers.smartrecruiters.com', 'jobs.smartrecruiters.com'],
+  fields: {},
+};
+
+const JOBVITE: AtsDefinition = {
+  id: 'jobvite',
+  label: 'Jobvite',
+  hosts: ['jobs.jobvite.com'],
+  fields: {},
+};
+
+export const ATS_DEFINITIONS: readonly AtsDefinition[] = [
+  LEVER,
+  GREENHOUSE,
+  ASHBY,
+  WORKABLE,
+  SMARTRECRUITERS,
+  JOBVITE,
+];
+
+/**
+ * Any site the list above does not name. It is a definition rather than a
+ * refusal: an empty map means pass 2 has nothing to say and the other three
+ * passes do the work, which is the same thing that happens on Workable. What
+ * differs is only how the content script gets there — see src/fill/inject.ts.
+ */
 const UNKNOWN: AtsDefinition = {
   id: 'unknown',
   label: 'this page',
@@ -125,3 +174,21 @@ export function atsForUrl(url: string): AtsDefinition {
 export const CONTENT_MATCHES: readonly string[] = ATS_DEFINITIONS.flatMap((d) =>
   d.hosts.map((h) => `https://${h}/*`),
 );
+
+/**
+ * The boards it knows, as a sentence, for the two places that tell somebody
+ * which those are.
+ *
+ * Both of them were hand-written lists naming Lever and Greenhouse, and both
+ * were still saying that after Ashby shipped — the refusal message, and the
+ * panel's own "Open a Lever or Greenhouse application", which is on screen
+ * while somebody tries to fill an Ashby form. One function rather than two
+ * copies for the reason `normaliseText` exists: the duplicate that drifts is
+ * always the one nobody is looking at.
+ */
+export function boardList(joiner: 'and' | 'or' = 'and'): string {
+  const names = ATS_DEFINITIONS.map((d) => d.label);
+  if (names.length === 0) return 'no boards yet';
+  if (names.length === 1) return names[0] as string;
+  return `${names.slice(0, -1).join(', ')} ${joiner} ${names[names.length - 1]}`;
+}
