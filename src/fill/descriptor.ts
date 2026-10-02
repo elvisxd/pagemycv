@@ -13,7 +13,13 @@
 // events can see the writes as they happen. Marking every control before
 // anything is decided would be worse than either: it would announce the scan
 // itself, including for the fields we then refuse.
-import type { FieldDescriptor, VisibilityMetrics } from './types';
+import { deepClosest, deepQueryAll, scopeOf } from './shadow';
+import type {
+  FieldDescriptor,
+  ListboxDescriptor,
+  ListboxSelectors,
+  VisibilityMetrics,
+} from './types';
 
 export type Control = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
@@ -46,7 +52,7 @@ const UNCOUNTED_TYPES = new Set([
  */
 export function countFillable(doc: Document = document): number {
   let n = 0;
-  for (const el of doc.querySelectorAll(SELECTOR)) {
+  for (const el of deepQueryAll<Element>(doc, SELECTOR)) {
     if (el instanceof HTMLInputElement && UNCOUNTED_TYPES.has(el.type.toLowerCase())) continue;
     if (el.hasAttribute('disabled')) continue;
     n++;
@@ -82,7 +88,7 @@ function isDisabled(el: Control): boolean {
   // `.disabled` already accounts for an ancestor <fieldset disabled>, which is
   // how a multi-step form greys out the steps you have not reached.
   if (el.disabled) return true;
-  return el.closest('fieldset[disabled]') !== null;
+  return deepClosest(el, 'fieldset[disabled]') !== null;
 }
 
 /**
@@ -196,7 +202,14 @@ function text(node: Element | null): string {
  * is valid HTML and invisible to the obvious lookup.
  */
 export function labelFor(el: Control): string {
-  const doc = el.ownerDocument;
+  // The node's OWN root, not the document. `id` is scoped per shadow root,
+  // so `document.getElementById` and `document.querySelector('label[for=…]')`
+  // both return nothing for a control inside one — no error, just a field
+  // that silently arrives unlabelled and is then refused as unrecognised.
+  // Worse than nothing when the document happens to hold the same id: the
+  // field is then labelled with a stranger's text. Measured in
+  // spikes/phase-4, and the test for it reverts to exactly that.
+  const doc = scopeOf(el);
 
   const byId = el.id ? doc.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
   if (byId) return text(byId);
@@ -205,12 +218,12 @@ export function labelFor(el: Control): string {
   if (labelledBy) {
     const parts = labelledBy
       .split(/\s+/)
-      .map((id) => text(doc.getElementById(id)))
+      .map((id) => text(doc.getElementById?.(id) ?? doc.querySelector(`#${CSS.escape(id)}`)))
       .filter(Boolean);
     if (parts.length) return parts.join(' ');
   }
 
-  const wrapping = el.closest('label');
+  const wrapping = deepClosest(el, 'label');
   if (wrapping) {
     // The control's own value would otherwise be read back as its label, which
     // is how a select's first option ends up looking like the question.
@@ -251,7 +264,7 @@ export function labelFor(el: Control): string {
   // label of the first one — which is how a value ends up in the right-looking
   // wrong box. One control in the group is the evidence that the label can
   // only be describing this field.
-  const group = el.closest('[class*="field" i], [class*="question" i], fieldset, li, p, div');
+  const group = deepClosest(el, '[class*="field" i], [class*="question" i], fieldset, li, p, div');
   if (group && group.querySelectorAll(SELECTOR).length === 1) {
     const inGroup = group.querySelector('label, legend, .label, [class*="label" i]');
     if (inGroup && !inGroup.contains(el)) return text(inGroup);
@@ -310,7 +323,11 @@ export function describeForm(doc: Document = document): {
     documentWidth: Math.max(root.scrollWidth, root.clientWidth),
     documentHeight: Math.max(root.scrollHeight, root.clientHeight),
   };
-  const all = Array.from(doc.querySelectorAll<Control>(SELECTOR));
+  // Pierces shadow roots, open and closed. A flat query on a Workday page
+  // returns nothing at all, so the form reads as empty rather than as
+  // unreadable — the worst kind of failure, because the panel then says the
+  // page has no fields and that sounds like an answer.
+  const all = deepQueryAll<Control>(doc, SELECTOR);
   all.forEach((el, index) => {
     const ref = `f${index}`;
     elements.set(ref, el);
@@ -343,4 +360,54 @@ export function describeForm(doc: Document = document): {
   });
 
   return { fields, elements };
+}
+
+/**
+ * The custom listboxes on this page, which `SELECTOR` cannot see.
+ *
+ * A Workday dropdown is a button and a menu, not a `<select>`, so nothing in
+ * `describeForm` reaches it. This is a separate pass rather than a wider
+ * selector because `Control` means an element with a `.value`, and widening
+ * it would put a button through every code path that assumes one.
+ *
+ * Reading only. The menu is not opened here: opening it is a write, it has to
+ * happen in the same task as the choice, and both belong to write.ts.
+ */
+export function describeListboxes(
+  doc: Document,
+  selectors: ListboxSelectors,
+): { boxes: ListboxDescriptor[]; elements: Map<string, Element> } {
+  const boxes: ListboxDescriptor[] = [];
+  const elements = new Map<string, Element>();
+
+  deepQueryAll<Element>(doc, selectors.container).forEach((container, index) => {
+    // A container that holds a real control is that control's wrapper, not a
+    // listbox. Workday names both `formField-…`, so the presence of a
+    // trigger and the absence of a control is what tells them apart.
+    if (deepQueryAll(container, SELECTOR).length > 0) return;
+    const trigger = container.querySelector(selectors.trigger);
+    if (!trigger) return;
+
+    const ref = `lb${index}`;
+    elements.set(ref, container);
+    const display = container.querySelector(selectors.display);
+    const shown = text(display);
+    boxes.push({
+      ref,
+      automationId: container.getAttribute('data-automation-id') ?? '',
+      label: labelForContainer(container),
+      // A trigger still showing its own placeholder has not been answered.
+      // Comparing against the label is what tells "Country" the prompt from
+      // "Country" the chosen value.
+      current: shown === text(container.querySelector('label')) ? '' : shown,
+    });
+  });
+
+  return { boxes, elements };
+}
+
+function labelForContainer(container: Element): string {
+  const own = container.querySelector('label, legend, [class*="label" i]');
+  const label = text(own) || container.getAttribute('aria-label')?.trim() || '';
+  return label.length <= MAX_LABEL ? label : '';
 }

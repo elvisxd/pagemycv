@@ -20,6 +20,7 @@ import { classify } from '../fill/detect';
 import type { FrameChoice, FrameReport } from '../fill/frames';
 import { chooseFrame, describeFrame } from '../fill/frames';
 import { injectContentScript, isAccessRefused } from '../fill/inject';
+import { planListboxes } from '../fill/listbox';
 import { reachForm } from '../fill/on-demand';
 import { buildPlan, planNeedsResume } from '../fill/plan';
 import { isNoListener, rollCall } from '../fill/roll-call';
@@ -302,6 +303,15 @@ async function fillActiveTab(): Promise<FillReport> {
     resume?.filename ?? null,
     answers,
   );
+  // Planned here, in the background, for the same reason the fields are: the
+  // content script is handed the one value it is going to write and never
+  // the profile it came from.
+  //
+  // `values` rather than `answers`: a Workday dropdown asks for a country or
+  // a city, which the CV holds. A screening question is not a dropdown, and
+  // if one ever is, it needs its own decision rather than this one widened
+  // by accident.
+  plan.listboxes = planListboxes(survey.listboxes, values, ats);
 
   const report = await sendFill(
     'fill:apply',

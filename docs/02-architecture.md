@@ -162,11 +162,13 @@ explicitly, and exempts the extension from quota eviction. Call
 | Obstacle | Solution |
 |---|---|
 | Open shadow roots | `element.shadowRoot`, recursing manually since `querySelectorAll` does not pierce boundaries |
-| **Closed** shadow roots | `chrome.dom.openOrClosedShadowRoot(el)`, available to content scripts only |
+| **Closed** shadow roots | `chrome.dom.openOrClosedShadowRoot(el)`, available to content scripts only. Verified in spikes/phase-4 against roots the page itself sees as `null`. Both cases go through one door, `src/fill/shadow.ts`, which the guard enforces. |
+| Labels inside any shadow root | `getRootNode()`, never the document: `id` is scoped per root, so a document lookup returns nothing — or, worse, another element's text where the same `id` exists outside. |
+| Events into any shadow root | `composed: true`. A bubbling event stops at the boundary, so a document-level listener never hears the fill and the form submits without it. |
 | Same-origin iframes | `iframe.contentDocument` from the parent |
 | Cross-origin iframes | A second content script instance in the child frame, messaging through the service worker |
 | Frames created after load | `chrome.scripting.executeScript` targeted by `frameId`, driven from `chrome.webNavigation.onCommitted` |
-| Frames inside a shadow root | **Unreachable.** Not exposed by Chromium by design. Rare. Fall back to opening the ATS URL directly. |
+| Frames inside a shadow root | **Reachable, and no fallback is needed.** ~~Unreachable, fall back to opening the ATS URL directly.~~ Corrected by spikes/phase-4: such a frame is not *enumerable*, but it is injected into like any other and announces itself with its own `frameId`. Phase 3 builds its roster from those announcements rather than from enumeration, so the fallback this row asked for was dead code that was never written. |
 
 The declarative `all_frames: true` flag only covers frames present at page load.
 Greenhouse and Ashby embeds are script-injected, often after the Apply button is

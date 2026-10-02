@@ -10,11 +10,12 @@ PageMyCV is the browser half of [Byte](https://github.com/elvisxd/byte). Byte fi
 the job, scores it against your profile and writes the text. PageMyCV is the hand
 that types it into the form and then stops.
 
-**Status: Phase 3 done.** It fills Lever and Greenhouse applications from an
-encrypted local vault — on the board itself, or embedded in a company's own
-careers page, which is where most applications actually live. It attaches your
-résumé, highlights everything it wrote, and refuses to touch a sensitive field
-or a honeypot. It still has no network code at all.
+**Status: Phase 4 partly done.** It fills Lever, Greenhouse, Ashby and Workday
+applications from an encrypted local vault — on the board itself, embedded in
+a company's own careers page, which is where most applications actually live,
+or hidden inside a closed shadow root, which is where Workday puts them. It
+attaches your résumé, highlights everything it wrote, and refuses to touch a
+sensitive field or a honeypot. It still has no network code at all.
 
 It opens with nothing asked. There is no passphrase and no sign-in: the vault
 key is generated once and kept in extension storage. The database stays
@@ -119,6 +120,10 @@ which is the same thing that happens on **any other site**: open the
 application, click the PageMyCV icon on that tab, press Fill. That click is
 Chrome's `activeTab` grant — one tab, until you leave it, nothing stored.
 
+Workday is declared as well — any `*.myworkdayjobs.com` tenant, because every
+tenant has its own subdomain and the apex is never an application form. It is
+the odd one out (closed shadow roots, a wizard) and has its own section below.
+
 There are still no host permissions. On the declared boards the match list
 is the grant; everywhere else the grant is the click, and the extension
 cannot read the address of a tab it is not running in.
@@ -144,11 +149,23 @@ including your preferred name, which is left blank unless you set it,
 because a preferred-name field exists precisely because the answer may
 differ from the legal one.
 
-Then, as its own phase, because it is a shadow-heavy single-page app with a bot
-honeypot, a click-intercepting overlay and a wizard whose length changes per
-employer:
+**Partly working**, as its own phase, because it is a shadow-heavy
+single-page app with a bot honeypot, a click-intercepting overlay and a
+wizard whose length changes per employer:
 
 `Workday`
+
+The shadow DOM part is done and proven in a real browser: every control on a
+Workday form can sit inside a *closed* shadow root, which a normal query
+cannot see at all, and the extension reaches through it —
+[`spikes/phase-4/`](spikes/phase-4/) measured 0 controls found flat against 4
+found through the pierce. The honeypot is refused inside there too.
+
+What is **not** done: stepping the multi-page wizard, and the selectors for
+Workday's custom dropdowns, which are modelled from documentation because
+nobody has opened a real tenant yet. They live as data on the ATS definition
+so that one real page fixes them without touching any logic. Treat Workday as
+"fills the page in front of you, check it before you continue".
 
 **Deliberately unsupported: LinkedIn and Indeed.** Both prohibit browser
 extensions that automate activity on their sites, whatever the extension does.

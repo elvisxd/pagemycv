@@ -1,0 +1,7 @@
+{
+  "name": "pagemycv-phase-4-spikes",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Can a content script reach, read and write a field inside a CLOSED shadow root? Yes — but not the way descriptor.ts finds its labels.",
+  "scripts": { "spike": "node run.cjs" }
+}

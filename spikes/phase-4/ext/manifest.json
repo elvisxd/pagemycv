@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "PageMyCV Phase 4 spikes",
+  "version": "0.0.1",
+  "minimum_chrome_version": "116",
+  "permissions": [],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["https://*.myworkdayjobs.com/*"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_idle",
+      "js": ["content.js"]
+    }
+  ]
+}

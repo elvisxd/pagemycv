@@ -29,7 +29,7 @@ every answer is one command away from being re-checked.
 |---|---|---|
 | 1 | Does `chrome.offscreen` accept the reason `WORKERS`? | **Yes.** No fallback needed. |
 | 2 | Does `opfs-sahpool` survive a full browser restart? | **Yes.** Written in one run, read back in the next against the same profile. |
-| 3 | Are Workday's shadow roots open or closed? | **Open question.** Not runnable without a real application page. |
+| 3 | Are Workday's shadow roots open or closed? | **Retired, not answered.** Asked as *does it matter?* it was runnable, and the answer is no. See spikes/phase-4. |
 | 4 | Can the extension fetch loopback? | **Yes on 141.** Local Network Access is enforced from 142, so re-run before relying on it. |
 | 5 | Does `chrome.storage.session` round-trip a `CryptoKey`? | **No.** It returns a plain object, silently. |
 
@@ -45,6 +45,14 @@ variable in the offscreen document. `chrome.storage.session` accepts a
 `CryptoKey` without error and hands back a useless plain object, which is the
 worst kind of failure because nothing tells you.
 
+**Spike 3 was the one that still mattered**, and it stayed open through three
+phases because it was written as a question about Workday. Turned around — not
+*are they closed* but *does closed change anything* — it ran in an afternoon
+against a fixture that attaches its own closed roots, and retired itself.
+The original wording below is kept because the mistake is the lesson: a
+question phrased so that only an inaccessible system can answer it will sit
+unanswered forever, and the useful version is usually one step to the side.
+
 **Spike 3 is the one that still matters.** Every existing Workday automation
 used Playwright or the DevTools protocol, both of which pierce shadow DOM
 natively, so none of them ever had to answer it. A content script does not have
@@ -52,7 +60,8 @@ that power. It needs a real `*.myworkdayjobs.com` page and it is the only
 remaining unknown that could change the shape of Phase 4.
 
 **Gate: passed for 1, 2, 4 and 5.** Phase 1 can start. Phase 4 cannot be
-planned in detail until spike 3 is answered.
+planned in detail until spike 3 is answered. *(It was, before Phase 4 —
+by rephrasing it.)*
 
 ## Phase 1 — The vault · done
 
@@ -324,21 +333,60 @@ adding it is a registry entry plus a probe, not a design change.
 
 ---
 
-## Phase 4 — Workday
+## Phase 4 — Workday · partly done
 
-Its own phase because it is its own problem.
+Its own phase because it is its own problem. The problem turned out to be
+smaller than planned in one place and larger in another.
 
-- The `data-automation-id` map from `09-ats.md`
-- **Hard denylist for `beecatcher` and `website`**
-- Custom listboxes opened and selected in a single synchronous pass, because the
-  menu closes between round trips
-- Synthetic events rather than naive clicks, because of the intercepting overlay
-- Read the live Application Progress list rather than hardcoding a step count,
-  which varies per employer
-- Account creation stays manual. The extension never creates an account.
+Built:
 
-**Gate.** A complete Workday application filled across every wizard step, with a
-DOM assertion proving `beecatcher` was never written to, then submitted by hand.
+- One door into shadow roots, `src/fill/shadow.ts`, enforced by the guard the
+  way the doors to `crypto.subtle` and SQLite are. Reaches open and closed
+  roots alike, nested to any depth.
+- The `data-automation-id` map from `09-ats.md`, with the voluntary-disclosure
+  fields deliberately absent
+- Workday's hosts, matched by a new `*.` form because every tenant has its own
+  subdomain
+- **The hard denylist for `beecatcher` and `website`**, now exercised against a
+  honeypot inside a closed root
+- Custom listboxes opened and answered in a single synchronous pass
+- Synthetic events rather than naive clicks
+- Account creation stays manual, which needed no code: `password` was already
+  in `UNWRITABLE_INPUT_TYPES`
+
+**Three bugs in already-merged code**, all of them latent because no ATS we
+supported used shadow DOM, all of them silent:
+
+| Bug | What it did |
+|---|---|
+| `write.ts` dispatched non-`composed` events | The field holds the value; a document-level listener never hears it, so the form submits empty |
+| `descriptor.ts` resolved labels through the document | `id` is scoped per root: no label, or a stranger's label where the document has the same `id` |
+| `closest()` stops at the boundary | The wrapper and group walks end early |
+
+**Not built, and honestly so:**
+
+- **Reading the live Application Progress list.** The extension fills the page
+  in front of it; stepping a wizard means knowing what a real wizard emits,
+  and nobody here has seen one.
+- The listbox **selectors** are a hypothesis. The mechanism is tested; the
+  strings are modelled from documentation. They live on the ATS definition as
+  data so that opening one real tenant fixes them without touching logic.
+
+**How to close it:** `spikes/phase-4/capture-from-a-real-tenant.js` is a
+console snippet that collects exactly what would settle the hypothesis half
+— the automation ids, the dropdown shape, and whether the menu really dies
+between tasks — and never reads a field value. It reads and does not write,
+and there is no `.value` access anywhere in it. Paste it into one real
+application and only data should need to change.
+
+**Gate: not met, and it cannot be met from here.** The documented gate is a
+complete application across every wizard step, submitted by hand. That needs
+an account on a real tenant — account creation is manual by design, and this
+container cannot reach `*.myworkdayjobs.com` at all. What the browser gate
+does assert, against a page whose three roots are verified closed and where a
+flat query finds zero controls: the fields are filled, a field two roots deep
+is reached, every sensitive field is left empty, the honeypot is refused by
+the denylist, the custom listbox is answered, and nothing is submitted.
 
 ---
 

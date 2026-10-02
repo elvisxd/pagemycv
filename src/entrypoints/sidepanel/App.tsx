@@ -576,12 +576,21 @@ export function App() {
             <div role="status" aria-live="polite" data-testid="fill-report">
               <Tally
                 counts={[
-                  { state: 'filled', label: 'filled', n: report.filled + report.attached },
+                  {
+                    state: 'filled',
+                    label: 'filled',
+                    // `selected` belongs here. A dropdown we opened and
+                    // answered is filled; leaving it out of the tally made
+                    // the one thing the listbox code did invisible.
+                    n: report.filled + report.attached + report.selected,
+                  },
                   {
                     state: 'sensitive',
                     label: 'left to you',
-                    n: report.fields.filter((f) => f.action === 'skip' && f.reason === 'sensitive')
-                      .length,
+                    // Declined dropdowns are left to you, not failures.
+                    n:
+                      report.fields.filter((f) => f.action === 'skip' && f.reason === 'sensitive')
+                        .length + report.declined.length,
                   },
                   {
                     state: 'review',
@@ -614,6 +623,14 @@ export function App() {
               />
             );
           })}
+          {report.declined.map((f) => (
+            <Row
+              key={`declined-${f.ref}`}
+              title={f.label}
+              subtitle={f.detail}
+              chip={<StateChip state="sensitive" label="left to you" />}
+            />
+          ))}
           {report.failures.map((f) => (
             <Row
               key={`fail-${f.ref}`}

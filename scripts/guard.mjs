@@ -232,6 +232,14 @@ forbid(/crypto\s*\??\.\s*subtle|\bsubtle\b\s*\./, 'crypto.subtle outside the one
   'src/vault/crypto.ts',
 ]);
 forbid(/sqlite3InitModule|OpfsSAHPoolDb/, 'SQLite outside the one door', ['src/db/worker.ts']);
+// Reaching into a closed shadow root is a capability, not a utility. A second
+// caller is a second place that can forget the closed case — and the closed
+// case fails silently: a flat query just returns nothing, so the form reads
+// as empty rather than as unreadable.
+forbid(/openOrClosedShadowRoot/, 'the shadow-root door is src/fill/shadow.ts', [
+  'src/fill/shadow.ts',
+]);
+// The key is matched by what it IS, not by what it is called.
 // The vault key is on disk now: there is no passphrase, so something has to
 // hold it. What this still enforces is that ONE module does. The rule used to
 // be "never persisted" and the allowlist was the worker, which turned out to
@@ -353,6 +361,10 @@ if (contentText) {
     'boards.greenhouse.io',
     'job-boards.greenhouse.io',
     'jobs.ashbyhq.com',
+    // Subdomains only. Every Workday tenant has its own, so the host cannot
+    // be enumerated; the apex is not an application form and the registry
+    // returns `unknown` for it.
+    '*.myworkdayjobs.com',
     // From the URL table in docs/09-ats.md. Declared with empty field maps:
     // the host is documented, the form is not, and a map written from
     // guesswork would be a hypothesis with a confidence score.
@@ -389,6 +401,7 @@ const ENFORCED = [
   'invariant 5, one network door',
   'the vault key reaches persistent storage through one module and no other',
   'one door each to crypto.subtle, to SQLite and to writing the page',
+  'one door into closed shadow roots',
   'the writer re-checks the element before it writes',
   'no telemetry, direct or transitive',
   'the manifest permissions and CSP, and no host_permissions',
