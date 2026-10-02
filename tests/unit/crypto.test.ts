@@ -3,16 +3,21 @@ import {
   aad,
   checkVerifier,
   decryptValue,
-  deriveKey,
+  deriveKeyMaterial,
   encryptValue,
+  importKeyMaterial,
   KDF,
   KDF_ID,
-  MIN_PASSPHRASE,
+  KEY_BYTES,
   makeVerifier,
+  newKeyMaterial,
   PAD_BLOCK,
-  passphraseProblem,
   randomSalt,
 } from '../../src/vault/crypto';
+
+/** The conversion path, which is the only thing a passphrase is still for. */
+const deriveKey = async (passphrase: string, salt: Uint8Array): Promise<CryptoKey> =>
+  importKeyMaterial(await deriveKeyMaterial(passphrase, salt));
 
 const PASSPHRASE = 'correct horse battery staple';
 let key: CryptoKey;
@@ -23,7 +28,48 @@ beforeAll(async () => {
   key = await deriveKey(PASSPHRASE, salt);
 }, 60_000);
 
-describe('deriveKey', () => {
+describe('a vault key with no passphrase behind it', () => {
+  it('is the full AES-256 width', () => {
+    expect(newKeyMaterial()).toHaveLength(KEY_BYTES);
+    expect(KEY_BYTES).toBe(32);
+  });
+
+  it('is never the same twice', () => {
+    const a = Buffer.from(newKeyMaterial());
+    const b = Buffer.from(newKeyMaterial());
+    expect(a.equals(b)).toBe(false);
+  });
+
+  it('round trips through the store as bytes', async () => {
+    const material = newKeyMaterial();
+    const written = await importKeyMaterial(material);
+    const blob = await encryptValue(written, 'Orlando', 'contact:1', 'city_enc');
+    // A copy, because what comes back out of chrome.storage is a new array,
+    // not the one that went in.
+    const read = await importKeyMaterial(new Uint8Array(material));
+    await expect(decryptValue(read, blob, 'contact:1', 'city_enc')).resolves.toBe('Orlando');
+  });
+
+  it('cannot be exported once imported', async () => {
+    expect((await importKeyMaterial(newKeyMaterial())).extractable).toBe(false);
+  });
+
+  it('refuses material of the wrong length rather than padding it', async () => {
+    // Silently accepting a short key would encrypt the vault under something
+    // nobody can reproduce, and the failure would land at the first read.
+    await expect(importKeyMaterial(new Uint8Array(16))).rejects.toThrow(/32 bytes/);
+    await expect(importKeyMaterial(new Uint8Array(33))).rejects.toThrow(/32 bytes/);
+  });
+
+  it('does not open a vault made under a different key', async () => {
+    const blob = await makeVerifier(await importKeyMaterial(newKeyMaterial()));
+    await expect(checkVerifier(await importKeyMaterial(newKeyMaterial()), blob)).resolves.toBe(
+      false,
+    );
+  });
+});
+
+describe('deriving from a passphrase, for the one-time conversion', () => {
   it('produces a key that cannot be exported', () => {
     expect(key.extractable).toBe(false);
   });
@@ -151,22 +197,6 @@ describe('verifier', () => {
   }, 60_000);
 });
 
-describe('passphrase strength', () => {
-  it('refuses a passphrase Argon2id cannot save', () => {
-    expect(passphraseProblem('short')).toMatch(/at least/);
-    expect(passphraseProblem('')).toMatch(/at least/);
-  });
-
-  it('accepts a memorable phrase', () => {
-    expect(passphraseProblem('correct horse battery staple')).toBeNull();
-  });
-
-  it('measures characters, not words', () => {
-    expect(passphraseProblem('a'.repeat(MIN_PASSPHRASE))).toBeNull();
-    expect(passphraseProblem('a'.repeat(MIN_PASSPHRASE - 1))).toMatch(/at least/);
-  });
-});
-
 // The parameters below are asserted against literals on purpose. Comparing
 // them to the constants they describe would make the test pass for any value,
 // and these two numbers are the entire security argument for choosing Argon2id.
@@ -177,12 +207,6 @@ describe('the security parameters are pinned', () => {
 
   it('names Argon2id as the derivation, not a fallback', () => {
     expect(KDF_ID).toBe('argon2id');
-  });
-
-  it('requires twelve characters', () => {
-    expect(MIN_PASSPHRASE).toBe(12);
-    expect(passphraseProblem('elevenchars')).toMatch(/at least/);
-    expect(passphraseProblem('twelvechars!')).toBeNull();
   });
 
   it('binds a ciphertext to row, column, version and padding', () => {
@@ -197,7 +221,10 @@ describe('the security parameters are pinned', () => {
   });
 });
 
-// A passphrase is what the user typed, not how their keyboard encoded it.
+// A passphrase is what the user typed, not how their keyboard encoded it. This
+// matters more now than it did, not less: the conversion gets ONE chance to
+// derive the key an old vault is already encrypted under, and a vault created
+// on a Mac and converted on a PC would otherwise be unopenable for good.
 describe('Unicode normalization', () => {
   it('opens with the same passphrase in either normal form', async () => {
     const s = randomSalt();
@@ -210,11 +237,4 @@ describe('Unicode normalization', () => {
     const read = await deriveKey(decomposed, s);
     await expect(decryptValue(read, blob, 'contact:1', 'city_enc')).resolves.toBe('Orlando');
   }, 120_000);
-
-  it('counts length after normalizing, so the rule and the key agree', () => {
-    // Twelve characters composed, thirteen code units decomposed.
-    const decomposed = 'contraseñaX'.normalize('NFD');
-    expect(decomposed.length).toBeGreaterThan(11);
-    expect(passphraseProblem(decomposed)).toMatch(/at least/);
-  });
 });

@@ -18,8 +18,10 @@ CV on Google's servers, which is exactly what this project exists to avoid.
 
 ## Conventions
 
-- A column ending in `_enc` holds an AES-GCM ciphertext blob. Never readable
-  without the passphrase. Every one is encrypted with
+- A column ending in `_enc` holds an AES-GCM ciphertext blob, unreadable
+  without the vault key, which lives in `chrome.storage.local` rather than in
+  this file. See `03-security.md` for what that does and does not buy. Every
+  one is encrypted with
   `additionalData = rowId + "." + columnName + "." + schemaVersion`, so a
   ciphertext cannot be moved between rows or columns. See `03-security.md`.
 - Low-entropy sensitive columns are padded to a fixed block before encryption,
@@ -243,12 +245,44 @@ src/db/migrations/
 
 ## Backup and portability
 
-An encrypted export is a real requirement, not a nice-to-have: OPFS data is
-tied to one browser profile on one machine, and losing it means retyping your
-entire history.
+A real requirement, not a nice-to-have: OPFS data is tied to one browser
+profile on one machine, and removing the extension deletes both the database
+and the key that opens it.
 
-- **Export** writes a single file containing the ciphertext columns as they are,
-  plus the vault's salt and parameters. The passphrase is still required to read
-  it. Exporting is logged to `event_log`.
-- **Import** into a fresh install restores everything with the same passphrase.
-- The export is never uploaded anywhere by the extension. You move the file.
+**Built.** The side panel's *Backup* section exports everything a person
+entered to `pagemycv-backup-YYYY-MM-DD.json` and restores it — into the same
+browser or a brand-new one. The format and its validator are
+`src/backup/format.ts`; the worker's `exportBackup` and `importBackup` do the
+reading and writing.
+
+- **The file is not encrypted.** This reverses what this section said the day
+  before, and the reason is something found while building it: **no code sets
+  a sensitive value.** `sensitive_value` is seeded empty when a vault is
+  created and nothing ever writes `value_enc`. So what a backup can hold today
+  is the CV, the résumé file and the screening answers — roughly what gets sent
+  to employers anyway. A passphrase on the file would buy little for that, and
+  would turn a forgotten passphrase into a lost backup, which is the exact
+  failure a backup exists to prevent. Decided with Elvis, not by default.
+- **That reasoning expires.** The day sensitive values become settable, an
+  unencrypted backup must not carry them. `tests/unit/backup-coverage.test.ts`
+  fails as soon as the worker gains an `UPDATE sensitive_value`, with a
+  message that says to redesign the backup before adding them to it.
+- **Every table has a decision.** The same test fails if a migration adds a
+  table that is neither in `BACKED_UP_TABLES` nor in `NOT_BACKED_UP` with a
+  reason, or if a table excluded as "nothing writes it yet" starts being
+  written. A backup that silently forgets a table restores "successfully" and
+  the loss is found weeks later.
+- **Restore replaces, it does not merge.** A merge has no answer for "the
+  backup has no résumé and the vault does". After a restore the vault is
+  exactly the file, in one transaction, all or nothing.
+- **A damaged file is refused before anything is touched**, naming the field.
+  A restore that guessed at a damaged file would replace a good vault with a
+  guess. Unknown screening questions are refused too, and a backup from a
+  newer PageMyCV says so rather than calling itself damaged.
+- **The résumé passes the same rules as an upload** — type allowlist, 8 MB —
+  because a backup file is just another way in.
+- The key does not travel. A restore goes into whichever vault is open and is
+  sealed again under its key.
+- The export is never uploaded anywhere by the extension. It is saved from the
+  panel's own page as a blob link, which needs no permission; `chrome.downloads`
+  stays refused by the guard.

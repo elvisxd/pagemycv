@@ -40,3 +40,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
 
       - run: node tests/e2e/gate.cjs
+      # Its own step, not a gate check. With the fix removed, the gate caught
+      # this race in one run of three and this caught it in three of three.
+      # Why the gate misses it was never established; which one to trust was.
+      - run: node tests/e2e/offscreen-race.cjs

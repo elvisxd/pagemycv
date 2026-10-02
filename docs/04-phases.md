@@ -110,6 +110,12 @@ a failure.
 Plus 81 unit tests, including the one the AAD design exists for: a ciphertext
 moved to another row or column fails to decrypt.
 
+> **Six of those rows no longer describe the build.** The passphrase was
+> removed on request after Phase 4 — see "The passphrase comes out" below. The
+> table is left as it was because it records what Phase 1 shipped and passed,
+> not what is true today; rewriting it would erase the fact that the property
+> was once there and was given up deliberately.
+
 Two corrections to the plan, found by building it:
 
 - **The Argon2 package name in the research was wrong.** `@openpgp/argon2id` is
@@ -417,6 +423,97 @@ hosts. Do not start it until Phase 4's gate has passed.
 
 **Gate.** A fresh Chrome profile installs the unpacked build and completes a
 Lever application.
+
+---
+
+## The passphrase comes out
+
+Not a phase. Asked for directly — *"que abra normal sin login ni nada"* — after
+a Google sign-in was costed and set aside for later.
+
+What it changes is written up in `03-security.md` under "What dropping the
+passphrase cost", including the part that is a real loss: a copied browser
+profile now reads the CV. The short version is that with no passphrase there
+is no secret the machine does not also have, so no storage choice recovers
+that property. What survives is the split between the two stores, which is
+what makes a copy of the *database file alone* useless.
+
+Three things were found building it, all by measuring rather than reasoning:
+
+- **`chrome` is undefined inside a dedicated worker** (`spikes/phase-5`). The
+  worker is where the key is used and would have been the natural owner. It
+  cannot be, so the design changed before it was written.
+- **An offscreen document has `chrome.runtime` and nothing else.** This one
+  was not measured first, it was assumed — the key store went there, and every
+  open failed. The gate caught it. The key store now lives in the service
+  worker, which is the only context that can hold it.
+- **`ensureOffscreen` waited for the document to exist, not to answer.** A
+  latent race that predates this change: `createDocument` resolves before the
+  document's scripts have run, and anything sent in that window comes back
+  "Receiving end does not exist". One relayed message could absorb it; a
+  sequence could not, so opening the vault made it visible. It now waits for
+  a ping, which is the fix the original comment had already described without
+  applying.
+
+Existing vaults are converted rather than abandoned: the passphrase is asked
+for once, the key it derives is stored, and nothing is re-encrypted, because
+it is the same key. The ordering that makes that safe is in
+`src/vault/convert.ts` and tested in `tests/unit/convert.test.ts`.
+
+---
+
+## Any site, not a list of sites
+
+Not a phase either. Asked for: fill on the popular boards and on the ones
+nobody has listed, faster, with the CV as it is and the rest typed in.
+
+The classifier never cared which board it was on. Pass 0 (the sensitive
+class), pass 1 (`autocomplete`), pass 3 (Chromium's patterns) and pass 4 (the
+label rules) are standards and words; only pass 2 is a per-board map, and
+three boards already shipped with a thin or empty one. So "any site" was
+never a classification problem. It was two smaller ones:
+
+- **Getting the script there.** Declared boards get it from the manifest.
+  Anywhere else it is injected into the active tab under `activeTab`, after
+  the person clicks the icon — one tab, until navigation, nothing stored.
+  `src/fill/inject.ts` is the only module allowed to do it.
+- **Stopping the refusal.** `chooseFrame` and `fillActiveTab` both threw
+  "not a board" on an unknown origin. An unknown origin is a definition with
+  an empty map now, chosen on what the frame holds.
+
+Three boards were declared on the strength of the host table in
+`09-ats.md` — Workable, SmartRecruiters, Jobvite — with empty maps, which is
+a deliberate state: the host is documented, the form is not.
+
+**What the gate cannot drive, measured.** Every route to the `activeTab`
+grant was tried from Playwright (`spikes/phase-6`): keyboard commands never
+reach the browser, the icon cannot be clicked, `permissions.request` needs a
+gesture, and a grant written into the profile by hand is not honoured. So
+the injection is one line CI never runs. Everything around it runs: the
+decision in `src/fill/on-demand.ts` with fakes; a form with no recognisable
+field names filling from labels alone, in unit tests and in the gate; and
+Chrome's refusal on the page with no script, which is real in the gate and
+is what becomes the message telling the person to click the icon.
+
+**Gate.** `tests/fixtures/generic.html`: name, email, phone, employer, title
+and links fill with no map; the résumé attaches; a screening question with
+no stored answer, the work-authorisation question, the cover letter and the
+off-screen `website` are all left alone. The page with no content script
+says how to grant it, naming the boards that need no grant.
+
+**Not done.** A field a form asks for that neither the CV nor the answers
+hold — street address, postal code, a start date — is reported as "nothing
+stored", which is honest and unhelpful. The panel has nowhere to type those
+yet. That is the next piece: your details, typed once, filled everywhere.
+
+**Not measured.** An unknown page that embeds a form from a *second* unknown
+origin. `activeTab` is documented as a grant on the tab; whether
+`executeScript` with `allFrames` reaches a cross-origin frame under it, or
+skips it, or fails, is exactly the kind of fact this project measures rather
+than reads — and it cannot be measured headlessly, for the same reason the
+grant itself cannot. Until somebody tries it on a real page, the honest
+expectation is that the embedded form is *not* reached, and the message says
+to open the form's own page instead.
 
 ---
 

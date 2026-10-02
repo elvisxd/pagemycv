@@ -6,19 +6,25 @@
 // cannot host this: it has neither that API nor the Worker constructor needed
 // to delegate. Both were confirmed in a real browser, see spikes/phase-0.
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import {
+  BACKUP_FORMAT,
+  BACKUP_VERSION,
+  type Backup,
+  BackupError,
+  parseBackup,
+} from '../backup/format';
 import type { FieldKind, FillValues, ResumeFile, ScreeningAnswers } from '../fill/types';
 import { SCREENING_KINDS } from '../fill/types';
 import { parseCvMarkdown } from '../import/cv-markdown';
 import { SENSITIVE_FIELDS } from '../sensitive/registry';
+import { fromBase64, toBase64 } from '../util/base64';
+import { KEY_DOES_NOT_OPEN } from '../vault/convert';
 import {
   checkVerifier,
   decryptValue,
-  deriveKey,
   encryptValue,
-  KDF,
-  KDF_ID,
+  importKeyMaterial,
   makeVerifier,
-  passphraseProblem,
   randomSalt,
 } from '../vault/crypto';
 import INITIAL_SQL from './migrations/001_initial.sql?raw';
@@ -27,7 +33,9 @@ import type { ProfileView, ResumeMeta, VaultState } from './schema';
 
 const DB_PATH = '/pagemycv.sqlite3';
 const POOL_NAME = 'pagemycv';
-const AUTO_LOCK_MS = 15 * 60 * 1000;
+
+/** What the `kdf` column says for a vault with no passphrase behind it. */
+const KDF_RANDOM = 'random';
 
 // biome-ignore lint/suspicious/noExplicitAny: the sqlite-wasm oo1 handle is untyped.
 type Db = any;
@@ -41,22 +49,14 @@ let db: Db | null = null;
  * random rather than like a race.
  */
 let opening: Promise<Db> | null = null;
-/** Never written anywhere. Lost when this worker dies, which is intended. */
-let key: CryptoKey | null = null;
-let locksAt = 0;
 /**
- * Bumped every time the vault locks. An operation that captured the key before
- * a lock holds a local reference that nulling `key` cannot reach, so it would
- * happily finish decrypting and hand plaintext back after the vault reported
- * itself locked. Every await that sits between capturing the key and using its
- * output re-checks this.
+ * Null until the offscreen document hands the material over.
+ *
+ * This worker cannot fetch it: `chrome` is undefined here, measured rather
+ * than assumed (spikes/phase-5). So the window between the worker starting
+ * and being given the key is real, and every read has to cope with it.
  */
-let keyGeneration = 0;
-
-interface KeyLease {
-  readonly key: CryptoKey;
-  readonly generation: number;
-}
+let key: CryptoKey | null = null;
 
 const uid = () => crypto.randomUUID();
 const now = () => Date.now();
@@ -147,75 +147,42 @@ function log(kind: string, detail?: string): void {
   });
 }
 
-function autoLockIfDue(): void {
-  if (key && locksAt && now() > locksAt) lockVault('auto');
-}
-
-function lockVault(why: string): void {
-  if (!key) return;
-  key = null;
-  locksAt = 0;
-  keyGeneration++;
-  if (db) log('lock', why);
-}
-
 function state(): VaultState {
-  autoLockIfDue();
-  // Never report a database we could not open as an absent vault. That screen
-  // offers to create one, and creating over an existing vault is data loss.
+  // Never report a database we could not open as an absent vault. That path
+  // creates one, and creating over an existing vault is data loss.
   if (!db) return { status: 'unavailable', problem: 'the database could not be opened' };
   const hasVault = (db.selectValue('SELECT count(*) FROM vault') as number) > 0;
   if (!hasVault) return { status: 'absent' };
-  return key ? { status: 'unlocked', locksAt } : { status: 'locked' };
+  if (key) return { status: 'unlocked' };
+  // A vault exists but this worker has not been given its key. Which screen
+  // that means depends on why, and only the kdf column knows: a vault made
+  // from a passphrase has key material nobody has stored yet.
+  const kdf = db.selectValue('SELECT kdf FROM vault WHERE id = 1') as string;
+  return kdf === KDF_RANDOM ? { status: 'opening' } : { status: 'needs_passphrase' };
 }
 
-function extendLock(): void {
-  if (key) locksAt = now() + AUTO_LOCK_MS;
+function requireKey(): CryptoKey {
+  if (!key) throw new Error('the vault is not open yet');
+  return key;
 }
 
-function requireKey(): KeyLease {
-  autoLockIfDue();
-  if (!key) throw new Error('vault is locked');
-  extendLock();
-  return { key, generation: keyGeneration };
-}
-
-/**
- * Call after every await before using the leased key or emitting anything
- * derived from it. Throws if the vault locked in the meantime.
- */
-function stillLeased(lease: KeyLease): CryptoKey {
-  if (!key || lease.generation !== keyGeneration) {
-    throw new Error('the vault locked while this was running, so nothing was returned');
-  }
-  return lease.key;
-}
-
-async function createVault(passphrase: string): Promise<VaultState> {
-  // Enforced here rather than only in the panel, because the panel is not the
-  // authority and a vault created weak can never be strengthened afterwards
-  // without re-encrypting everything.
-  const problem = passphraseProblem(passphrase);
-  if (problem) throw new Error(problem);
+async function createVault(material: Uint8Array): Promise<VaultState> {
   await openDatabase();
   if ((db.selectValue('SELECT count(*) FROM vault') as number) > 0) {
     throw new Error('a vault already exists');
   }
+  // Kept NOT NULL and kept random even though nothing derives from it. A
+  // vault converted from a passphrase still needs its original salt to stay
+  // meaningful, so the column cannot become "unused" for one kind and
+  // load-bearing for the other without the rows lying about which is which.
   const salt = randomSalt();
-  const derived = await deriveKey(passphrase, salt);
+  const derived = await importKeyMaterial(material);
   const verifier = await makeVerifier(derived);
   const t = now();
   db.exec({
     sql: `INSERT INTO vault (id, kdf, kdf_params, salt, verifier_enc, created_at, updated_at)
           VALUES (1, ?, ?, ?, ?, ?, ?)`,
-    bind: [
-      KDF_ID,
-      JSON.stringify({ m: KDF.memorySize, t: KDF.iterations, p: KDF.parallelism }),
-      salt,
-      verifier,
-      t,
-      t,
-    ],
+    bind: [KDF_RANDOM, '{}', salt, verifier, t, t],
   });
   for (const f of SENSITIVE_FIELDS) {
     db.exec({
@@ -225,29 +192,59 @@ async function createVault(passphrase: string): Promise<VaultState> {
     });
   }
   key = derived;
-  extendLock();
   log('create');
   return state();
 }
 
-async function unlockVault(passphrase: string): Promise<VaultState> {
+/**
+ * Take the key material the offscreen document is holding.
+ *
+ * Checked against the verifier rather than trusted. Adopting the wrong key
+ * would not fail here — AES-GCM only complains when something is decrypted —
+ * so the first symptom would be every field reading as an error, long after
+ * the cause, and a create-over-the-top would look like the fix.
+ */
+async function openVault(material: Uint8Array): Promise<VaultState> {
   await openDatabase();
-  const row = rows<{ salt: Uint8Array; verifier_enc: Uint8Array }>(
-    'SELECT salt, verifier_enc FROM vault WHERE id = 1',
-  )[0];
-  if (!row) throw new Error('no vault to unlock');
-  const derived = await deriveKey(passphrase, new Uint8Array(row.salt));
-  if (!(await checkVerifier(derived, new Uint8Array(row.verifier_enc)))) {
-    log('unlock_failed');
-    throw new Error('wrong passphrase');
+  const row = rows<{ verifier_enc: Uint8Array }>('SELECT verifier_enc FROM vault WHERE id = 1')[0];
+  if (!row) throw new Error('no vault to open');
+  const candidate = await importKeyMaterial(material);
+  if (!(await checkVerifier(candidate, new Uint8Array(row.verifier_enc)))) {
+    log('open_failed');
+    throw new Error(KEY_DOES_NOT_OPEN);
   }
-  key = derived;
-  extendLock();
-  log('unlock');
+  key = candidate;
+  log('open');
   return state();
 }
 
-async function readContact(lease: KeyLease): Promise<ProfileView['contact']> {
+/** The salt an existing passphrase vault was created with. Not a secret. */
+async function vaultSalt(): Promise<Uint8Array> {
+  await openDatabase();
+  const row = rows<{ salt: Uint8Array }>('SELECT salt FROM vault WHERE id = 1')[0];
+  if (!row) throw new Error('no vault');
+  return new Uint8Array(row.salt);
+}
+
+/**
+ * Record that this vault no longer has a passphrase behind it.
+ *
+ * Called only after the derived material has been verified AND stored. The
+ * data is not re-encrypted: it is the same key either way, so there is no
+ * half-converted state to recover from. Only the label changes, and it
+ * changes last, so a crash anywhere before this leaves a vault that still
+ * asks for the passphrase rather than one that asks for nothing and cannot
+ * open.
+ */
+function markConverted(): void {
+  db.exec({
+    sql: 'UPDATE vault SET kdf = ?, kdf_params = ?, updated_at = ? WHERE id = 1',
+    bind: [KDF_RANDOM, '{}', now()],
+  });
+  log('converted');
+}
+
+async function readContact(vaultKey: CryptoKey): Promise<ProfileView['contact']> {
   const row = rows<Record<string, Uint8Array | string | null>>(
     'SELECT email_enc, phone_enc, city_enc, region, country FROM contact WHERE id = 1',
   )[0];
@@ -255,9 +252,9 @@ async function readContact(lease: KeyLease): Promise<ProfileView['contact']> {
   const open = async (column: string): Promise<string | null> => {
     const blob = row[column];
     if (!blob || typeof blob === 'string') return null;
-    // stillLeased before each decrypt, so a lock landing mid-read stops the
+    // The key is passed in rather than re-read, so one read cannot see two
     // next one rather than finishing the set and posting plaintext out.
-    return decryptValue(stillLeased(lease), new Uint8Array(blob), 'contact:1', column);
+    return decryptValue(vaultKey, new Uint8Array(blob), 'contact:1', column);
   };
   return {
     email: await open('email_enc'),
@@ -269,7 +266,7 @@ async function readContact(lease: KeyLease): Promise<ProfileView['contact']> {
 }
 
 async function profileView(): Promise<ProfileView> {
-  const lease = requireKey();
+  const vaultKey = requireKey();
   const profileRow = rows<Record<string, string | null>>(
     'SELECT legal_first, legal_last, preferred_name, headline, summary FROM profile WHERE id = 1',
   )[0];
@@ -283,7 +280,7 @@ async function profileView(): Promise<ProfileView> {
           summary: profileRow.summary ?? null,
         }
       : null,
-    contact: await readContact(lease),
+    contact: await readContact(vaultKey),
     work: rows<Record<string, string | number | null>>(
       'SELECT id, employer, title, location, is_remote, started_on, ended_on, description, sort_order FROM work_history ORDER BY sort_order',
     ).map((r) => ({
@@ -333,7 +330,7 @@ async function profileView(): Promise<ProfileView> {
 async function importCv(
   markdown: string,
 ): Promise<{ imported: true; counts: Record<string, number> }> {
-  const lease = requireKey();
+  const vaultKey = requireKey();
   const cv = parseCvMarkdown(markdown);
 
   // This operation deletes every role, degree and link before inserting. If the
@@ -352,11 +349,10 @@ async function importCv(
   // publishes an open transaction to anything else that runs in the meantime,
   // and the transaction belongs to the connection rather than to this call.
   const seal = async (value: string | null, column: string) =>
-    value ? await encryptValue(stillLeased(lease), value, 'contact:1', column) : null;
+    value ? await encryptValue(vaultKey, value, 'contact:1', column) : null;
   const cityEnc = await seal(cv.city, 'city_enc');
   const emailEnc = await seal(cv.email, 'email_enc');
   const phoneEnc = await seal(cv.phone, 'phone_enc');
-  stillLeased(lease);
 
   db.exec('BEGIN');
   try {
@@ -445,29 +441,38 @@ const RESUME_TYPES: Readonly<Record<string, string>> = {
   'text/plain': 'txt',
 };
 
+/**
+ * The rules a stored résumé has to meet, wherever it came from. Shared with
+ * the restore on purpose: a backup file is just another way in, and a rule
+ * that only the upload button enforces is a rule a hand-edited backup skips.
+ */
+function resumeProblem(mimeType: string, base64: string): string | null {
+  if (!RESUME_TYPES[mimeType]) {
+    return `${mimeType || 'that file type'} is not accepted. Use a PDF, a Word document, or plain text.`;
+  }
+  // Measured on the decoded length, not the base64 length, so the limit means
+  // what it says.
+  const bytes = Math.floor((base64.length * 3) / 4);
+  if (bytes === 0) return 'that file is empty';
+  if (bytes > MAX_RESUME_BYTES) {
+    return `that file is ${Math.round(bytes / 1024 / 1024)} MB; the limit is 8 MB`;
+  }
+  return null;
+}
+
 async function setResume(
   filename: string,
   mimeType: string,
   base64: string,
 ): Promise<{ stored: true; meta: ResumeMeta }> {
-  const lease = requireKey();
-  if (!RESUME_TYPES[mimeType]) {
-    throw new Error(
-      `${mimeType || 'that file type'} is not accepted. Use a PDF, a Word document, or plain text.`,
-    );
-  }
-  // Measured on the decoded length, not the base64 length, so the limit means
-  // what it says.
+  const vaultKey = requireKey();
+  const problem = resumeProblem(mimeType, base64);
+  if (problem) throw new Error(problem);
   const bytes = Math.floor((base64.length * 3) / 4);
-  if (bytes === 0) throw new Error('that file is empty');
-  if (bytes > MAX_RESUME_BYTES) {
-    throw new Error(`that file is ${Math.round(bytes / 1024 / 1024)} MB; the limit is 8 MB`);
-  }
   // The bytes are encrypted as their base64 text rather than as a BLOB. That
   // keeps crypto.ts's surface to the one string-in, string-out door the
   // security doc pins, and the 33% it costs on disk is not worth widening it.
-  const enc = await encryptValue(stillLeased(lease), base64, `document:${RESUME_ID}`, 'bytes_enc');
-  stillLeased(lease);
+  const enc = await encryptValue(vaultKey, base64, `document:${RESUME_ID}`, 'bytes_enc');
   const t = now();
   db.exec({
     sql: `INSERT INTO document (id, kind, filename, mime_type, bytes_enc, is_default, created_at)
@@ -488,16 +493,15 @@ function resumeRow(): { filename: string; mime_type: string; bytes_enc: Uint8Arr
   )[0];
 }
 
-async function readResume(lease: KeyLease): Promise<ResumeFile | null> {
+async function readResume(vaultKey: CryptoKey): Promise<ResumeFile | null> {
   const row = resumeRow();
   if (!row) return null;
   const base64 = await decryptValue(
-    stillLeased(lease),
+    vaultKey,
     new Uint8Array(row.bytes_enc),
     `document:${RESUME_ID}`,
     'bytes_enc',
   );
-  stillLeased(lease);
   return { filename: row.filename, mimeType: row.mime_type, base64 };
 }
 
@@ -510,7 +514,7 @@ async function readResume(lease: KeyLease): Promise<ResumeFile | null> {
  * ordering, no flag and no later filter that could go wrong and leak one.
  */
 async function readFillValues(): Promise<{ values: FillValues; resume: ResumeFile | null }> {
-  const lease = requireKey();
+  const vaultKey = requireKey();
   const values: FillValues = {};
   const put = (kind: keyof FillValues, value: string | null | undefined) => {
     const trimmed = value?.trim();
@@ -536,7 +540,7 @@ async function readFillValues(): Promise<{ values: FillValues; resume: ResumeFil
     const open = async (column: string): Promise<string | null> => {
       const blob = c[column];
       if (!blob || typeof blob === 'string') return null;
-      return decryptValue(stillLeased(lease), new Uint8Array(blob), 'contact:1', column);
+      return decryptValue(vaultKey, new Uint8Array(blob), 'contact:1', column);
     };
     put('email', await open('email_enc'));
     put('phone', await open('phone_enc'));
@@ -576,8 +580,7 @@ async function readFillValues(): Promise<{ values: FillValues; resume: ResumeFil
     else if (!values.portfolio_url) put('portfolio_url', link.url);
   }
 
-  stillLeased(lease);
-  return { values, resume: await readResume(lease) };
+  return { values, resume: await readResume(vaultKey) };
 }
 
 /**
@@ -590,7 +593,7 @@ async function readFillValues(): Promise<{ values: FillValues; resume: ResumeFil
  * the rest of a fill working.
  */
 async function readScreeningAnswers(): Promise<ScreeningAnswers> {
-  const lease = requireKey();
+  const vaultKey = requireKey();
   const out: ScreeningAnswers = {};
   for (const row of rows<{ kind: string; answer_enc: Uint8Array }>(
     'SELECT kind, answer_enc FROM screening_answer',
@@ -598,7 +601,7 @@ async function readScreeningAnswers(): Promise<ScreeningAnswers> {
     if (!SCREENING_KINDS.includes(row.kind as FieldKind)) continue;
     try {
       out[row.kind as FieldKind] = await decryptValue(
-        stillLeased(lease),
+        vaultKey,
         new Uint8Array(row.answer_enc),
         `screening:${row.kind}`,
         'answer_enc',
@@ -609,7 +612,7 @@ async function readScreeningAnswers(): Promise<ScreeningAnswers> {
 }
 
 async function setScreeningAnswer(kind: string, answer: string): Promise<{ saved: true }> {
-  const lease = requireKey();
+  const vaultKey = requireKey();
   // The kind has to be one we know. A row keyed by anything else could never
   // be read back by the fill path, so storing it would be a silent no-op
   // that looks like it worked.
@@ -624,7 +627,7 @@ async function setScreeningAnswer(kind: string, answer: string): Promise<{ saved
     db?.exec({ sql: 'DELETE FROM screening_answer WHERE kind = ?', bind: [kind] });
     return { saved: true };
   }
-  const enc = await encryptValue(stillLeased(lease), trimmed, `screening:${kind}`, 'answer_enc');
+  const enc = await encryptValue(vaultKey, trimmed, `screening:${kind}`, 'answer_enc');
   db?.exec({
     sql: `INSERT INTO screening_answer (kind, answer_enc, updated_at) VALUES (?, ?, ?)
           ON CONFLICT(kind) DO UPDATE SET
@@ -635,19 +638,295 @@ async function setScreeningAnswer(kind: string, answer: string): Promise<{ saved
   return { saved: true };
 }
 
+const CONTACT_COLUMNS = [
+  ['email', 'email_enc'],
+  ['phone', 'phone_enc'],
+  ['addressLine1', 'address_line1_enc'],
+  ['addressLine2', 'address_line2_enc'],
+  ['city', 'city_enc'],
+  ['postalCode', 'postal_code_enc'],
+] as const;
+
+/**
+ * Everything a person entered, decrypted, as one object. The panel turns it
+ * into a file; nothing here writes anywhere.
+ *
+ * Read with one key reference throughout, so a single export cannot mix
+ * values decrypted under two different keys.
+ */
+async function exportBackup(): Promise<Backup> {
+  const vaultKey = requireKey();
+  const p = rows<{
+    legal_first: string;
+    legal_last: string;
+    preferred_name: string | null;
+    headline: string | null;
+    summary: string | null;
+    locale: string;
+  }>(
+    'SELECT legal_first, legal_last, preferred_name, headline, summary, locale FROM profile WHERE id = 1',
+  )[0];
+
+  const c = rows<Record<string, unknown>>('SELECT * FROM contact WHERE id = 1')[0];
+  let contact: Backup['contact'] = null;
+  if (c) {
+    const open = async (column: string): Promise<string | null> => {
+      const blob = c[column];
+      return blob
+        ? decryptValue(vaultKey, new Uint8Array(blob as Uint8Array), 'contact:1', column)
+        : null;
+    };
+    const values: Record<string, string | null> = {};
+    for (const [field, column] of CONTACT_COLUMNS) values[field] = await open(column);
+    contact = {
+      email: values.email ?? null,
+      phone: values.phone ?? null,
+      addressLine1: values.addressLine1 ?? null,
+      addressLine2: values.addressLine2 ?? null,
+      city: values.city ?? null,
+      region: (c.region as string | null) ?? null,
+      postalCode: values.postalCode ?? null,
+      country: String(c.country ?? 'US'),
+    };
+  }
+
+  const work = rows<{
+    employer: string;
+    title: string;
+    location: string | null;
+    is_remote: number;
+    started_on: string;
+    ended_on: string | null;
+    description: string | null;
+  }>(
+    'SELECT employer, title, location, is_remote, started_on, ended_on, description FROM work_history ORDER BY sort_order',
+  ).map((w) => ({
+    employer: w.employer,
+    title: w.title,
+    location: w.location,
+    isRemote: w.is_remote === 1,
+    startedOn: w.started_on,
+    endedOn: w.ended_on,
+    description: w.description,
+  }));
+
+  const education = rows<{
+    institution: string;
+    degree: string | null;
+    field: string | null;
+    started_on: string | null;
+    ended_on: string | null;
+  }>(
+    'SELECT institution, degree, field, started_on, ended_on FROM education ORDER BY sort_order',
+  ).map((e) => ({
+    institution: e.institution,
+    degree: e.degree,
+    field: e.field,
+    startedOn: e.started_on,
+    endedOn: e.ended_on,
+  }));
+
+  const links = rows<{ kind: string; url: string }>(
+    'SELECT kind, url FROM link ORDER BY sort_order',
+  ).map((l) => ({ kind: l.kind, url: l.url }));
+
+  const resume = await readResume(vaultKey);
+  const screeningAnswers = (await readScreeningAnswers()) as Record<string, string>;
+
+  log('export_backup', `${work.length} roles, ${education.length} degrees`);
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: new Date(now()).toISOString(),
+    profile: p
+      ? {
+          legalFirst: p.legal_first,
+          legalLast: p.legal_last,
+          preferredName: p.preferred_name,
+          headline: p.headline,
+          summary: p.summary,
+          locale: p.locale,
+        }
+      : null,
+    contact,
+    work,
+    education,
+    links,
+    resume,
+    screeningAnswers,
+  };
+}
+
+/**
+ * Replace the vault's contents with a backup's. All of it or none of it.
+ *
+ * REPLACE rather than merge, because a merge has no answer for "the backup
+ * has no résumé and the vault does": keeping it would make the restore
+ * depend on what happened to be there, and the point of restoring is that
+ * afterwards the vault is exactly the file.
+ */
+async function importBackup(
+  text: string,
+): Promise<{ restored: true; counts: Record<string, number> }> {
+  const vaultKey = requireKey();
+  let backup: Backup;
+  try {
+    backup = parseBackup(text);
+  } catch (err) {
+    // Refused before anything is read, encrypted or deleted.
+    throw err instanceof BackupError ? new Error(err.message) : err;
+  }
+  if (backup.resume) {
+    const problem = resumeProblem(backup.resume.mimeType, backup.resume.base64);
+    if (problem) throw new Error(`the résumé in that backup cannot be restored: ${problem}`);
+  }
+
+  // Everything encrypted BEFORE the transaction opens, as importCv does: an
+  // await between BEGIN and COMMIT would leave the transaction open to any
+  // command that ran in the meantime.
+  const contactEnc: Record<string, Uint8Array | null> = {};
+  if (backup.contact) {
+    for (const [field, column] of CONTACT_COLUMNS) {
+      const value = backup.contact[field];
+      contactEnc[column] = value ? await encryptValue(vaultKey, value, 'contact:1', column) : null;
+    }
+  }
+  const resumeEnc = backup.resume
+    ? await encryptValue(vaultKey, backup.resume.base64, `document:${RESUME_ID}`, 'bytes_enc')
+    : null;
+  const answersEnc: [string, Uint8Array][] = [];
+  for (const [kind, answer] of Object.entries(backup.screeningAnswers)) {
+    const trimmed = answer.trim();
+    if (trimmed) {
+      answersEnc.push([
+        kind,
+        await encryptValue(vaultKey, trimmed, `screening:${kind}`, 'answer_enc'),
+      ]);
+    }
+  }
+
+  const t = now();
+  db.exec('BEGIN');
+  try {
+    for (const table of [
+      'profile',
+      'contact',
+      'work_history',
+      'education',
+      'link',
+      'screening_answer',
+    ]) {
+      db.exec(`DELETE FROM ${table}`);
+    }
+    db.exec({ sql: "DELETE FROM document WHERE kind = 'resume'" });
+
+    const p = backup.profile;
+    if (p) {
+      db.exec({
+        sql: `INSERT INTO profile (id, legal_first, legal_last, preferred_name, headline, summary, locale, created_at, updated_at)
+              VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [p.legalFirst, p.legalLast, p.preferredName, p.headline, p.summary, p.locale, t, t],
+      });
+    }
+    const c = backup.contact;
+    if (c) {
+      db.exec({
+        sql: `INSERT INTO contact (id, email_enc, phone_enc, address_line1_enc, address_line2_enc, city_enc, region, postal_code_enc, country, created_at, updated_at)
+              VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [
+          contactEnc.email_enc ?? null,
+          contactEnc.phone_enc ?? null,
+          contactEnc.address_line1_enc ?? null,
+          contactEnc.address_line2_enc ?? null,
+          contactEnc.city_enc ?? null,
+          c.region,
+          contactEnc.postal_code_enc ?? null,
+          c.country,
+          t,
+          t,
+        ],
+      });
+    }
+    backup.work.forEach((w, i) => {
+      db.exec({
+        sql: `INSERT INTO work_history (id, employer, title, location, is_remote, started_on, ended_on, description, sort_order, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [
+          uid(),
+          w.employer,
+          w.title,
+          w.location,
+          w.isRemote ? 1 : 0,
+          w.startedOn,
+          w.endedOn,
+          w.description,
+          i,
+          t,
+          t,
+        ],
+      });
+    });
+    backup.education.forEach((e, i) => {
+      db.exec({
+        sql: `INSERT INTO education (id, institution, degree, field, started_on, ended_on, sort_order, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [uid(), e.institution, e.degree, e.field, e.startedOn, e.endedOn, i, t, t],
+      });
+    });
+    backup.links.forEach((l, i) => {
+      db.exec({
+        sql: 'INSERT INTO link (id, kind, url, sort_order) VALUES (?, ?, ?, ?)',
+        bind: [uid(), l.kind, l.url, i],
+      });
+    });
+    if (backup.resume && resumeEnc) {
+      db.exec({
+        sql: `INSERT INTO document (id, kind, filename, mime_type, bytes_enc, is_default, created_at)
+              VALUES (?, 'resume', ?, ?, ?, 1, ?)`,
+        bind: [RESUME_ID, backup.resume.filename, backup.resume.mimeType, resumeEnc, t],
+      });
+    }
+    for (const [kind, enc] of answersEnc) {
+      db.exec({
+        sql: 'INSERT INTO screening_answer (kind, answer_enc, updated_at) VALUES (?, ?, ?)',
+        bind: [kind, enc, t],
+      });
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {}
+    throw err;
+  }
+  const counts = {
+    work: backup.work.length,
+    education: backup.education.length,
+    links: backup.links.length,
+    answers: answersEnc.length,
+    resume: backup.resume ? 1 : 0,
+  };
+  log('import_backup', JSON.stringify(counts));
+  return { restored: true, counts };
+}
+
 const handlers: Record<string, (payload: Record<string, string>) => Promise<unknown>> = {
   async state() {
     await openDatabase();
     return state();
   },
-  async create({ passphrase }) {
-    return createVault(passphrase ?? '');
+  async create({ material }) {
+    return createVault(fromBase64(material ?? ''));
   },
-  async unlock({ passphrase }) {
-    return unlockVault(passphrase ?? '');
+  async open({ material }) {
+    return openVault(fromBase64(material ?? ''));
   },
-  async lock() {
-    lockVault('manual');
+  async salt() {
+    return toBase64(await vaultSalt());
+  },
+  async markConverted() {
+    await openDatabase();
+    markConverted();
     return state();
   },
   async profile() {
@@ -657,12 +936,6 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
   async importCv({ markdown }) {
     await openDatabase();
     return importCv(markdown ?? '');
-  },
-  async touch() {
-    await openDatabase();
-    autoLockIfDue();
-    extendLock();
-    return state();
   },
   async fillValues() {
     await openDatabase();
@@ -679,6 +952,14 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
   async setResume({ filename, mimeType, base64 }) {
     await openDatabase();
     return setResume(filename ?? '', mimeType ?? '', base64 ?? '');
+  },
+  async exportBackup() {
+    await openDatabase();
+    return exportBackup();
+  },
+  async importBackup({ text }) {
+    await openDatabase();
+    return importBackup(text ?? '');
   },
   async resumeMeta() {
     await openDatabase();

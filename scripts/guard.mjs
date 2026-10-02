@@ -240,12 +240,23 @@ forbid(/openOrClosedShadowRoot/, 'the shadow-root door is src/fill/shadow.ts', [
   'src/fill/shadow.ts',
 ]);
 // The key is matched by what it IS, not by what it is called.
+// The vault key is on disk now: there is no passphrase, so something has to
+// hold it. What this still enforces is that ONE module does. The rule used to
+// be "never persisted" and the allowlist was the worker, which turned out to
+// be the one context that cannot persist anything — `chrome` is undefined in a
+// dedicated worker (spikes/phase-5).
 forbid(
   /storage\.(local|session|managed)\.set|indexedDB\.|\bcaches\b\./,
-  'persistent storage: the vault key must never reach it',
-  ['src/db/worker.ts'],
+  'persistent storage: only the key store may write the vault key',
+  ['src/vault/key-store.ts'],
 );
 forbid(/exportKey|extractable\s*:\s*true/, 'an extractable key');
+// The one call that widens where the extension's code runs. On-demand
+// injection is the whole reason 'activeTab' and 'scripting' are in the
+// manifest, and one caller is the whole reason it is acceptable.
+forbid(/chrome\s*\??\.\s*scripting\b/, 'chrome.scripting outside the one door', [
+  'src/fill/inject.ts',
+]);
 
 // ── Dependencies ────────────────────────────────────────────────────────────
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
@@ -284,7 +295,19 @@ for (const b of BANNED) {
 }
 
 // ── The manifest ────────────────────────────────────────────────────────────
-const ALLOWED_PERMISSIONS = ['offscreen', 'unlimitedStorage', 'sidePanel'];
+// 'activeTab' and 'scripting' together are how a content script reaches a
+// page the manifest does not name: only the tab the person last invoked the
+// extension on, only until they leave it, and never persistently. Both are
+// here for exactly that, and src/fill/inject.ts is the only module allowed
+// to use them — the forbid() below enforces it. Still no host permissions.
+const ALLOWED_PERMISSIONS = [
+  'offscreen',
+  'unlimitedStorage',
+  'sidePanel',
+  'storage',
+  'activeTab',
+  'scripting',
+];
 const configPath = 'wxt.config.ts';
 const config = readFileSync(join(ROOT, configPath), 'utf8');
 
@@ -342,6 +365,13 @@ if (contentText) {
     // be enumerated; the apex is not an application form and the registry
     // returns `unknown` for it.
     '*.myworkdayjobs.com',
+    // From the URL table in docs/09-ats.md. Declared with empty field maps:
+    // the host is documented, the form is not, and a map written from
+    // guesswork would be a hypothesis with a confidence score.
+    'apply.workable.com',
+    'careers.smartrecruiters.com',
+    'jobs.smartrecruiters.com',
+    'jobs.jobvite.com',
   ];
   for (const h of hosts) {
     if (!ALLOWED_HOSTS.includes(h)) {
@@ -369,13 +399,13 @@ const ENFORCED = [
   'invariant 3, page content never becomes an instruction',
   'invariant 4, both honeypot layers exist and the planner calls them',
   'invariant 5, one network door',
-  'the vault key never reaches persistent storage',
+  'the vault key reaches persistent storage through one module and no other',
   'one door each to crypto.subtle, to SQLite and to writing the page',
   'one door into closed shadow roots',
   'the writer re-checks the element before it writes',
   'no telemetry, direct or transitive',
   'the manifest permissions and CSP, and no host_permissions',
-  'the content script reaches only the allowlisted job boards',
+  'the declared content script reaches only the allowlisted boards; elsewhere, one module, on the active tab',
 ];
 const NOT_ENFORCED = [
   'invariant 2 end to end — that a real form leaves them empty is gate.cjs, not this',

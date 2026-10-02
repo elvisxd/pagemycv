@@ -7,7 +7,15 @@
 // field on its own that the other passes could not reach.
 import type { FieldKind, ListboxSelectors } from '../fill/types';
 
-export type AtsId = 'lever' | 'greenhouse' | 'ashby' | 'workday' | 'unknown';
+export type AtsId =
+  | 'lever'
+  | 'greenhouse'
+  | 'ashby'
+  | 'workday'
+  | 'workable'
+  | 'smartrecruiters'
+  | 'jobvite'
+  | 'unknown';
 
 export interface AtsDefinition {
   id: AtsId;
@@ -144,8 +152,51 @@ const WORKDAY: AtsDefinition = {
   },
 };
 
-export const ATS_DEFINITIONS: readonly AtsDefinition[] = [LEVER, GREENHOUSE, ASHBY, WORKDAY];
+// The three below carry NO field map on purpose. Their hosts are documented
+// in docs/09-ats.md; their forms are not, and a map written from guesswork
+// is a hypothesis wearing the confidence score of a fact. With an empty map
+// pass 2 contributes nothing and the standards-based passes — autocomplete,
+// Chromium's patterns, our label rules — carry the form, which is exactly
+// what happens on a site nobody has named. Declaring the host buys one thing:
+// the content script is already there, so an application embedded in a
+// company careers page fills without the person clicking the icon first.
+const WORKABLE: AtsDefinition = {
+  id: 'workable',
+  label: 'Workable',
+  hosts: ['apply.workable.com'],
+  fields: {},
+};
 
+const SMARTRECRUITERS: AtsDefinition = {
+  id: 'smartrecruiters',
+  label: 'SmartRecruiters',
+  hosts: ['careers.smartrecruiters.com', 'jobs.smartrecruiters.com'],
+  fields: {},
+};
+
+const JOBVITE: AtsDefinition = {
+  id: 'jobvite',
+  label: 'Jobvite',
+  hosts: ['jobs.jobvite.com'],
+  fields: {},
+};
+
+export const ATS_DEFINITIONS: readonly AtsDefinition[] = [
+  LEVER,
+  GREENHOUSE,
+  ASHBY,
+  WORKDAY,
+  WORKABLE,
+  SMARTRECRUITERS,
+  JOBVITE,
+];
+
+/**
+ * Any site the list above does not name. It is a definition rather than a
+ * refusal: an empty map means pass 2 has nothing to say and the other three
+ * passes do the work, which is the same thing that happens on Workable. What
+ * differs is only how the content script gets there — see src/fill/inject.ts.
+ */
 const UNKNOWN: AtsDefinition = {
   id: 'unknown',
   label: 'this page',
