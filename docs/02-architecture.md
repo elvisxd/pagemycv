@@ -109,24 +109,22 @@ implemented for service and shared workers" anyway.
 
 ## Manifest shape
 
+What is actually built, not what was planned. The first draft of this section
+had `host_permissions` for every board, `optional_host_permissions` for the
+whole web, and a content script on `<all_urls>`; none of it was needed, and
+the one part that sounded right — ask for a broad grant at runtime, on a
+gesture — turned out to be untestable (see below).
+
 ```json
 {
   "manifest_version": 3,
-  "permissions": ["offscreen", "storage", "unlimitedStorage", "scripting", "webNavigation", "sidePanel"],
-  "host_permissions": [
-    "https://jobs.lever.co/*",
-    "https://boards.greenhouse.io/*",
-    "https://job-boards.greenhouse.io/*",
-    "https://jobs.ashbyhq.com/*",
-    "https://*.myworkdayjobs.com/*"
-  ],
-  "optional_host_permissions": ["https://*/*"],
+  "permissions": ["offscreen", "unlimitedStorage", "sidePanel", "storage", "activeTab", "scripting"],
   "content_scripts": [{
-    "matches": ["<all_urls>"],
+    "matches": ["https://jobs.lever.co/*", "https://boards.greenhouse.io/*", "…one per declared board"],
     "all_frames": true,
     "match_about_blank": true,
     "run_at": "document_idle",
-    "js": ["content.js"]
+    "js": ["content-scripts/content.js"]
   }],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
@@ -134,16 +132,26 @@ implemented for service and shared workers" anyway.
 }
 ```
 
-Three notes on that shape.
+No `host_permissions`, no `optional_host_permissions`. Two ways the content
+script reaches a page:
+
+| | How | Reach |
+|---|---|---|
+| A declared board | the manifest's `matches` | that origin, in every frame — so an embed on a company careers page is filled with no permission over the company's page |
+| Anywhere else | `chrome.scripting.executeScript` under `activeTab`, from `src/fill/inject.ts` | the one tab the person last clicked the icon on, until they navigate; the same `content.js`, read from the manifest so it cannot drift |
+
+**`activeTab` rather than an optional broad host.** Both were measured in
+`spikes/phase-6`. An optional grant needs a gesture Chrome will only take
+from a person, and a grant written into the profile by hand does not count —
+so the gate can drive neither. `activeTab` is the same in that respect, but
+it leaves nothing behind: no prompt, no stored list of sites the extension
+was ever allowed into, nothing to revoke. What the gate *can* drive is
+everything up to Chrome's refusal, including the refusal itself, and the
+decision logic is a module with fakes.
 
 **`wasm-unsafe-eval` is already the Manifest V3 default** and the Chrome Web
 Store accepts it without a user-facing permission warning. You only need to
 write it out because overriding `extension_pages` at all replaces the default.
-
-**Broad hosts go in `optional_host_permissions`, never in the required list.**
-Since 1 August 2026 Google enforces minimum permissions as a hard requirement.
-The broad grant is requested at runtime, on a user gesture, when you land on a
-career page that embeds an ATS on a domain we do not know.
 
 **`unlimitedStorage` covers OPFS**, which Chrome's documentation lists
 explicitly, and exempts the extension from quota eviction. Call

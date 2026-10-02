@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { boardList } from '../../ats/registry';
+import { type Backup, parseBackup, serializeBackup } from '../../backup/format';
 import type { ProfileView, ResumeMeta, VaultState } from '../../db/schema';
 import type { FieldKind, FillReport, PlannedField, ScreeningAnswers } from '../../fill/types';
 import { sendVault } from '../../messaging/vault';
@@ -130,6 +132,15 @@ export function App() {
   const [answers, setAnswers] = useState<ScreeningAnswers>({});
   const passphraseRef = useRef<HTMLInputElement>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * A backup file that has been read and checked, waiting for the person to
+   * say yes. Restoring replaces everything, so picking a file never does it
+   * by itself: the file is parsed first — a bad one is refused here, having
+   * changed nothing — and then the panel says what it would put back.
+   */
+  const [pendingBackup, setPendingBackup] = useState<{ text: string; backup: Backup } | null>(null);
+  const [restored, setRestored] = useState<string | null>(null);
   const markdownRef = useRef<HTMLTextAreaElement>(null);
   const importButtonRef = useRef<HTMLButtonElement>(null);
   /**
@@ -244,6 +255,73 @@ export function App() {
       setBusy(false);
       // Clearing it means picking the same file twice in a row still fires.
       if (resumeInputRef.current) resumeInputRef.current.value = '';
+    }
+  };
+
+  const exportBackup = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const backup = await sendVault('vault:exportBackup', undefined);
+      // A blob link rather than chrome.downloads: that API is a way out of the
+      // machine the guard refuses, and a file saved from the panel's own page
+      // needs no permission at all.
+      const url = URL.createObjectURL(
+        new Blob([serializeBackup(backup)], { type: 'application/json' }),
+      );
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `pagemycv-backup-${backup.exportedAt.slice(0, 10)}.json`;
+      link.click();
+      // Revoked after the click has been handled, not during it: revoking in
+      // the same task can cancel the download before it starts.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pickBackup = async (file: File) => {
+    setError(null);
+    setRestored(null);
+    try {
+      const text = await file.text();
+      // The same check the worker runs. Here it only decides what to show;
+      // the worker runs it again, because the panel is not the authority.
+      setPendingBackup({ text, backup: parseBackup(text) });
+    } catch (e) {
+      setPendingBackup(null);
+      setError(`${e instanceof Error ? e.message : String(e)}. Nothing was changed.`);
+    } finally {
+      if (backupInputRef.current) backupInputRef.current.value = '';
+    }
+  };
+
+  const restoreBackup = async () => {
+    if (!pendingBackup) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { counts } = await sendVault('vault:importBackup', { text: pendingBackup.text });
+      setPendingBackup(null);
+      // A fill report on screen lists values written from what was there
+      // before; after a restore it describes a vault that no longer exists.
+      setReport(null);
+      await refresh();
+      // Announced after the refresh, for the reason importCv's summary is: a
+      // message that runs ahead of the list below it promises what is not
+      // shown yet.
+      setRestored(
+        `Restored ${counts.work} roles, ${counts.education} degrees, ${counts.answers} answers${
+          counts.resume ? ' and your résumé file' : ''
+        }.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -442,9 +520,10 @@ export function App() {
       <Section title="Fill a form">
         <div style={{ padding: 12 }}>
           <p style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
-            Open a Lever or Greenhouse application in the active tab. PageMyCV fills what it
-            recognises, highlights every value it wrote, and never submits: the last click is always
-            yours.
+            Open an application form in the active tab. On {boardList('or')} it fills at once; on
+            any other site, click the PageMyCV icon in the toolbar first so Chrome lets it read that
+            one page. It fills what it recognises, highlights every value it wrote, and never
+            submits: the last click is always yours.
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button onClick={fill} disabled={filling || busy}>
@@ -633,6 +712,72 @@ export function App() {
           ))}
         </Section>
       ) : null}
+
+      <Section title="Backup">
+        <Muted>
+          Everything you entered, in one file you can restore here or in a new browser. The file is
+          not encrypted: whoever has it can read your CV and your answers.
+        </Muted>
+        <div style={{ marginTop: 8 }}>
+          <Button onClick={exportBackup} disabled={busy}>
+            Export backup
+          </Button>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <label
+            htmlFor="backup-file"
+            style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}
+          >
+            Restore from a backup · replaces what is here
+          </label>
+          <input
+            id="backup-file"
+            data-testid="backup-file"
+            ref={backupInputRef}
+            type="file"
+            accept=".json,application/json"
+            disabled={busy}
+            onChange={(e) => {
+              const file = (e.target as HTMLInputElement).files?.[0];
+              if (file) pickBackup(file);
+            }}
+            style={{ marginTop: 4, font: 'inherit', fontSize: 11, maxWidth: '100%' }}
+          />
+        </div>
+        {pendingBackup ? (
+          <div data-testid="backup-confirm" style={{ marginTop: 10 }}>
+            <p style={{ margin: '0 0 8px', fontSize: 12 }}>
+              Replace everything here with the backup
+              {pendingBackup.backup.exportedAt
+                ? ` from ${pendingBackup.backup.exportedAt.slice(0, 10)}`
+                : ''}
+              {pendingBackup.backup.profile
+                ? ` of ${pendingBackup.backup.profile.legalFirst} ${pendingBackup.backup.profile.legalLast}`
+                : ''}
+              ? It has {pendingBackup.backup.work.length} roles,{' '}
+              {Object.keys(pendingBackup.backup.screeningAnswers).length} answers
+              {pendingBackup.backup.resume ? ' and a résumé file' : ' and no résumé file'}.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button onClick={restoreBackup} disabled={busy}>
+                {busy ? 'Restoring…' : 'Replace and restore'}
+              </Button>
+              <Button variant="quiet" onClick={() => setPendingBackup(null)} disabled={busy}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {restored ? (
+          <p
+            role="status"
+            data-testid="backup-result"
+            style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)' }}
+          >
+            {restored}
+          </p>
+        ) : null}
+      </Section>
 
       {error ? <ErrorNote>{error}</ErrorNote> : null}
     </Screen>

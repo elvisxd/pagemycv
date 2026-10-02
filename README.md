@@ -23,6 +23,12 @@ same browser profile, so a copy of the *profile* is not. That trade is
 deliberate and written up in
 [`03-security.md`](docs/03-security.md#what-dropping-the-passphrase-cost).
 
+**Back it up.** Removing the extension deletes the vault and its key. The
+panel's *Backup* section exports everything you entered to one file and
+restores it into this browser or a new one. The file is not encrypted — see
+[`05-data.md`](docs/05-data.md#backup-and-portability) for why, and for the
+test that forces that decision to be revisited.
+
 | | |
 |---|---|
 | Sensitive fields filled automatically | **zero**, by construction |
@@ -104,11 +110,17 @@ is exposed to dedicated workers alone, and a service worker cannot spawn one.
 **Working today**, because they are plain HTML with stable ids and publish
 open job APIs:
 
-`Lever` · `Greenhouse` · `Ashby`
+`Lever` · `Greenhouse` · `Ashby` · `Workable` · `SmartRecruiters` · `Jobvite`
 
-The extension runs on `jobs.lever.co`, `boards.greenhouse.io`,
-`job-boards.greenhouse.io` and `jobs.ashbyhq.com`, and nowhere else. There are no host permissions:
-the content script's own match list is the entire grant, so the extension
+On those the extension runs as soon as the page loads, embedded or not. The
+last three carry no field map on purpose — the host is documented, the form
+is not — so they fill from labels and the `autocomplete` standard alone,
+which is the same thing that happens on **any other site**: open the
+application, click the PageMyCV icon on that tab, press Fill. That click is
+Chrome's `activeTab` grant — one tab, until you leave it, nothing stored.
+
+There are still no host permissions. On the declared boards the match list
+is the grant; everywhere else the grant is the click, and the extension
 cannot read the address of a tab it is not running in.
 
 **That holds for an embedded form too.** When a company's careers page puts the

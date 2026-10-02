@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Apply — Acme (a form no map knows)</title>
+  <style>
+    .trap { position: absolute; left: -9999px; top: -9999px; }
+    label { display: block; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <!--
+    A form with NO field name any ATS map knows. Every name below is made up,
+    so pass 2 (the per-ATS map) contributes nothing and the fill rests on the
+    standards-based passes alone: autocomplete, Chromium's patterns, and the
+    label rules. That is the whole of what PageMyCV has on a site nobody has
+    named, and this file is where that is measured.
+
+    Served at a Workable URL in the gate. Workable's definition carries an
+    empty map on purpose, so the classification here is identical to an
+    unknown site's; what the declared host adds is only that the content
+    script is already present, which is the half the gate can drive.
+
+    MODELLED, not copied: the labels are the ones job forms commonly use,
+    not the markup of any real Workable page.
+  -->
+  <h1>Senior Engineer — Acme</h1>
+  <form id="app" onsubmit="window.__submits=(window.__submits||0)+1;return false;">
+    <label for="c_fn">First name</label>
+    <input id="c_fn" name="candidate[firstname]" type="text">
+
+    <label for="c_ln">Last name</label>
+    <input id="c_ln" name="candidate[lastname]" type="text">
+
+    <label for="c_em">Email address</label>
+    <input id="c_em" name="candidate[mail]" type="email">
+
+    <label for="c_ph">Phone number</label>
+    <input id="c_ph" name="candidate[tel]" type="tel">
+
+    <!-- autocomplete, the first pass, on a field the label rules do not cover -->
+    <label for="c_pc">Postcode</label>
+    <input id="c_pc" name="candidate[zip]" type="text" autocomplete="postal-code">
+
+    <label for="c_co">Current company</label>
+    <input id="c_co" name="candidate[employer_now]" type="text">
+
+    <label for="c_ti">Job title</label>
+    <input id="c_ti" name="candidate[role_now]" type="text">
+
+    <label for="c_li">LinkedIn profile</label>
+    <input id="c_li" name="candidate[social_1]" type="url">
+
+    <label for="c_gh">GitHub</label>
+    <input id="c_gh" name="candidate[social_2]" type="url">
+
+    <label for="c_cv">Resume</label>
+    <input id="c_cv" name="candidate[attachment]" type="file">
+
+    <!-- A screening question: filled only from an answer the person typed. -->
+    <label for="c_src">How did you hear about this position?</label>
+    <input id="c_src" name="candidate[q_source]" type="text">
+
+    <!-- The sensitive class, on a site with no map: pass 0 must still win. -->
+    <label for="c_auth">Are you legally authorized to work in the United States?</label>
+    <select id="c_auth" name="candidate[q_auth]">
+      <option value="">Select</option>
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+
+    <!-- A cover letter box: never written automatically. -->
+    <label for="c_cl">Cover letter</label>
+    <textarea id="c_cl" name="candidate[letter]"></textarea>
+
+    <!-- The trap: off-screen and unlabelled. Both layers must refuse it. -->
+    <input class="trap" name="website" type="text" tabindex="-1" aria-hidden="true">
+
+    <button type="submit">Submit application</button>
+  </form>
+</body>
+</html>

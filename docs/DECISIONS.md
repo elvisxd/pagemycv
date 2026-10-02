@@ -123,6 +123,14 @@ forced by evidence rather than by taste.
 | **Converting an old vault** | **Store the key the passphrase already derives; re-encrypt nothing** | The alternative was re-encrypting every column under a new key, which is a migration that can stop halfway and leave rows readable under two different keys. Changing where the key comes from cannot half-finish. |
 | **Auto-lock and the Lock button** | **Both removed** | With the key on disk, locking would clear it from memory and the next call would silently read it back. A control that undoes itself is worse than no control, because it tells you the CV is protected while it is not. |
 
+| **Backup file** | **Plain JSON, no passphrase** | Asked, and chosen. What it can hold today is the CV, the résumé and the screening answers, because no code sets a sensitive value. A passphrase would make a forgotten passphrase a lost backup. `tests/unit/backup-coverage.test.ts` fails the day sensitive values become settable, so this cannot outlive its reason silently. |
+| **Restore semantics** | **Replace, in one transaction** | A merge has no answer for "the file has no résumé and the vault does". After a restore the vault is exactly the file. |
+| **Which tables a backup covers** | **Every table decided, by a test** | Adding a table to a migration reminds nobody to add it to the backup. The coverage test is that reminder: every table is backed up or excluded with a written reason. |
+
+| **Filling on a site nobody has named** | **`activeTab` + one injection module** | Asked for: popular sites and not-so-popular ones. The classifier never depended on the ATS — passes 0, 1, 3 and 4 are standards and labels — so the only question was how the script gets there. `activeTab` leaves nothing behind; an optional broad host would. Both measured in `spikes/phase-6`: neither can be driven by the gate, so the injection is one line in one guarded module and everything around it is tested instead. |
+| **More boards, declared with empty maps** | **Workable, SmartRecruiters, Jobvite: hosts yes, maps no** | A host from the documented table costs one manifest line and buys embeds filling without the icon click. A map written without seeing the form is a hypothesis with a confidence score; an empty one lets the standards-based passes carry it, and a field they miss is reported as unrecognised rather than guessed. |
+| **An unknown site is a definition** | **`UNKNOWN` has an empty map and is chosen like any board** | It used to be a refusal, which made "a site we have not named" indistinguishable from "no form here". `chooseFrame` now ranks on what a frame holds, not on whose it is. |
+
 ## Still open
 
 One thing, and it is the only one that could still change the shape of the

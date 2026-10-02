@@ -243,6 +243,12 @@ forbid(
   ['src/vault/key-store.ts'],
 );
 forbid(/exportKey|extractable\s*:\s*true/, 'an extractable key');
+// The one call that widens where the extension's code runs. On-demand
+// injection is the whole reason 'activeTab' and 'scripting' are in the
+// manifest, and one caller is the whole reason it is acceptable.
+forbid(/chrome\s*\??\.\s*scripting\b/, 'chrome.scripting outside the one door', [
+  'src/fill/inject.ts',
+]);
 
 // ── Dependencies ────────────────────────────────────────────────────────────
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
@@ -281,7 +287,19 @@ for (const b of BANNED) {
 }
 
 // ── The manifest ────────────────────────────────────────────────────────────
-const ALLOWED_PERMISSIONS = ['offscreen', 'unlimitedStorage', 'sidePanel', 'storage'];
+// 'activeTab' and 'scripting' together are how a content script reaches a
+// page the manifest does not name: only the tab the person last invoked the
+// extension on, only until they leave it, and never persistently. Both are
+// here for exactly that, and src/fill/inject.ts is the only module allowed
+// to use them — the forbid() below enforces it. Still no host permissions.
+const ALLOWED_PERMISSIONS = [
+  'offscreen',
+  'unlimitedStorage',
+  'sidePanel',
+  'storage',
+  'activeTab',
+  'scripting',
+];
 const configPath = 'wxt.config.ts';
 const config = readFileSync(join(ROOT, configPath), 'utf8');
 
@@ -335,6 +353,13 @@ if (contentText) {
     'boards.greenhouse.io',
     'job-boards.greenhouse.io',
     'jobs.ashbyhq.com',
+    // From the URL table in docs/09-ats.md. Declared with empty field maps:
+    // the host is documented, the form is not, and a map written from
+    // guesswork would be a hypothesis with a confidence score.
+    'apply.workable.com',
+    'careers.smartrecruiters.com',
+    'jobs.smartrecruiters.com',
+    'jobs.jobvite.com',
   ];
   for (const h of hosts) {
     if (!ALLOWED_HOSTS.includes(h)) {
@@ -367,7 +392,7 @@ const ENFORCED = [
   'the writer re-checks the element before it writes',
   'no telemetry, direct or transitive',
   'the manifest permissions and CSP, and no host_permissions',
-  'the content script reaches only the allowlisted job boards',
+  'the declared content script reaches only the allowlisted boards; elsewhere, one module, on the active tab',
 ];
 const NOT_ENFORCED = [
   'invariant 2 end to end — that a real form leaves them empty is gate.cjs, not this',

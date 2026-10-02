@@ -129,6 +129,8 @@ const COMMANDS: Record<Exclude<keyof DbProtocol, 'db:ping'>, string> = {
   'db:fillValues': 'fillValues',
   'db:setResume': 'setResume',
   'db:resumeMeta': 'resumeMeta',
+  'db:exportBackup': 'exportBackup',
+  'db:importBackup': 'importBackup',
 };
 
 for (const [key, cmd] of Object.entries(COMMANDS) as [keyof DbProtocol, string][]) {
