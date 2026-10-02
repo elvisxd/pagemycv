@@ -29,6 +29,11 @@ single request takes longer than 5 minutes, or when a fetch takes more than 30
 seconds to respond. Any global you set is lost. Design every handler to be
 resumable.
 
+The side panel's worker column is not idle: it is where pdf.js runs when a CV
+is imported from a PDF. The panel has a DOM, can spawn the reader's worker,
+and holds no key, which makes it the right context to parse a file the person
+chose. See `03-security.md`.
+
 ## Why the database cannot live in the service worker
 
 This is the single most important constraint in the project, and it is not a

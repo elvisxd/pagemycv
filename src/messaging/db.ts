@@ -4,8 +4,9 @@
 // Keys are prefixed 'db:' so they cannot be confused with the 'vault:' channel.
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { Backup } from '../backup/format';
-import type { ProfileView, ResumeMeta, VaultState } from '../db/schema';
-import type { FillValues, ResumeFile, ScreeningAnswers } from '../fill/types';
+import type { DocumentsMeta, ProfileView, ResumeMeta, VaultState } from '../db/schema';
+import type { DocumentKind, FillValues, ScreeningAnswers, StoredFiles } from '../fill/types';
+import type { ParsedCv } from '../import/cv-markdown';
 
 export interface DbProtocol {
   /**
@@ -28,18 +29,30 @@ export interface DbProtocol {
   /** Record that a converted vault has no passphrase behind it any more. */
   'db:markConverted'(): VaultState;
   'db:profile'(): ProfileView;
-  'db:importCv'(data: { markdown: string }): { imported: true; counts: Record<string, number> };
   /**
-   * The non-sensitive values the fill path may use, plus the resume bytes.
+   * Already parsed. The panel reads the file (PDF, Word, Markdown, text) and
+   * shows the result for correction first; what arrives here is what the
+   * person approved, so this takes the structure and never the file.
+   */
+  'db:importCv'(data: { cv: ParsedCv }): { imported: true; counts: Record<string, number> };
+  /**
+   * The non-sensitive values the fill path may use, plus the stored files.
    * There is no variant of this that returns a sensitive value: see
    * readFillValues in src/db/worker.ts.
    */
-  'db:fillValues'(): { values: FillValues; resume: ResumeFile | null };
-  'db:setResume'(data: { filename: string; mimeType: string; base64: string }): {
+  'db:fillValues'(): { values: FillValues; documents: StoredFiles };
+  /** Store the résumé or the cover letter file. One of each; a new one replaces. */
+  'db:setDocument'(data: {
+    kind: DocumentKind;
+    filename: string;
+    mimeType: string;
+    base64: string;
+  }): {
     stored: true;
     meta: ResumeMeta;
   };
-  'db:resumeMeta'(): ResumeMeta | null;
+  /** Filename and type of each stored file. Never the bytes. */
+  'db:documents'(): DocumentsMeta;
   /** Everything a person entered, decrypted. See src/backup/format.ts. */
   'db:exportBackup'(): Backup;
   /** Replace the vault's contents with a backup file's text. All or nothing. */

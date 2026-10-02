@@ -11,6 +11,7 @@
     "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
     "@webext-core/messaging": "^4.0.0",
     "hash-wasm": "^4.12.0",
+    "pdfjs-dist": "6.3.289",
     "preact": "^10.29.8"
   },
   "devDependencies": {

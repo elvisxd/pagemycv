@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { boardList } from '../../ats/registry';
 import { type Backup, parseBackup, serializeBackup } from '../../backup/format';
-import type { ProfileView, ResumeMeta, VaultState } from '../../db/schema';
-import type { FieldKind, FillReport, PlannedField, ScreeningAnswers } from '../../fill/types';
+import type { DocumentsMeta, ProfileView, VaultState } from '../../db/schema';
+import type {
+  DocumentKind,
+  FieldKind,
+  FillReport,
+  PlannedField,
+  ScreeningAnswers,
+} from '../../fill/types';
+import { readCvFile } from '../../import/cv-file';
+import { parseCvMarkdown } from '../../import/cv-markdown';
+import { parseCvText } from '../../import/cv-text';
 import { sendVault } from '../../messaging/vault';
 import {
   Button,
@@ -17,6 +26,7 @@ import {
   Tally,
 } from '../../ui/components';
 import { toBase64 } from '../../util/base64';
+import { type CvDraft, CvReview } from './CvReview';
 
 /**
  * How a planned field reads in the review list.
@@ -33,7 +43,12 @@ import { toBase64 } from '../../util/base64';
  * into real applications, so the box has to say what a good one looks like
  * rather than leaving somebody to guess at the format.
  */
-const SCREENING_PROMPTS: readonly { kind: FieldKind; label: string; hint: string }[] = [
+const SCREENING_PROMPTS: readonly {
+  kind: FieldKind;
+  label: string;
+  hint: string;
+  multiline?: boolean;
+}[] = [
   {
     kind: 'preferred_name',
     label: 'Preferred name',
@@ -64,7 +79,27 @@ const SCREENING_PROMPTS: readonly { kind: FieldKind; label: string; hint: string
     label: 'How you heard about the role',
     hint: 'The one you give most often. Change it per application when it matters.',
   },
+  {
+    kind: 'cover_letter',
+    label: 'Cover letter',
+    hint: 'Written by you, typed into a form that has a cover letter box. It is never generated. A letter for one role beats a general one; change it here before each application if you can. Forms that want a file use the cover letter file below instead.',
+    multiline: true,
+  },
 ];
+
+/** What each stored file is called in the panel. */
+const DOCUMENT_LABELS: Record<DocumentKind, string> = {
+  resume: 'Résumé file',
+  cover_letter: 'Cover letter file',
+};
+
+/** Shown for a type the reader can open. The .doc case has its own message. */
+const CV_FILE_ACCEPT =
+  '.pdf,.docx,.md,.txt,application/pdf,' +
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain';
+
+const NOT_A_CV =
+  'that does not look like a CV: no experience or education was found, so nothing was changed';
 
 function chipFor(field: PlannedField): { state: State; label: string } {
   if (field.action === 'fill') return { state: 'filled', label: field.strategy };
@@ -124,14 +159,24 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  /** The paste box, kept for a Markdown CV; the file picker is the front door. */
+  const [pasteMode, setPasteMode] = useState(false);
   const [markdown, setMarkdown] = useState('');
+  /**
+   * What was read and not yet stored. Picking a file never stores anything
+   * by itself: the reader guesses, so its result is shown as a form first,
+   * and the vault changes when Save is pressed and not before.
+   */
+  const [draft, setDraft] = useState<(CvDraft & { file: File | null }) | null>(null);
   const [imported, setImported] = useState<string | null>(null);
-  const [resume, setResume] = useState<ResumeMeta | null>(null);
+  const [documents, setDocuments] = useState<DocumentsMeta>({});
   const [report, setReport] = useState<FillReport | null>(null);
   const [filling, setFilling] = useState(false);
   const [answers, setAnswers] = useState<ScreeningAnswers>({});
   const passphraseRef = useRef<HTMLInputElement>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
+  const coverLetterInputRef = useRef<HTMLInputElement>(null);
+  const cvFileRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
   /**
    * A backup file that has been read and checked, waiting for the person to
@@ -171,11 +216,11 @@ export function App() {
     // and offers "Import your CV" over the CV already stored. Seeing that
     // immediately after unlocking reads as data loss.
     const view = await sendVault('vault:profile', undefined);
-    const storedResume = await sendVault('vault:resumeMeta', undefined);
+    const storedDocuments = await sendVault('vault:documents', undefined);
     const stored = await sendVault('vault:screeningAnswers', undefined);
     if (mine !== request.current) return;
     setProfile(view);
-    setResume(storedResume);
+    setDocuments(storedDocuments);
     setAnswers(stored);
     setVault(state);
   }, []);
@@ -196,14 +241,23 @@ export function App() {
   // to the body and a keyboard user has to tab from the top of the panel.
   // Closing it does the same in reverse.
   useEffect(() => {
-    if (showImport) markdownRef.current?.focus();
-    else importButtonRef.current?.focus();
-  }, [showImport]);
+    if (!showImport) importButtonRef.current?.focus();
+    else if (draft)
+      return; // the review form focuses its first field itself
+    else if (pasteMode) markdownRef.current?.focus();
+    else cvFileRef.current?.focus();
+  }, [showImport, pasteMode, draft]);
+
+  const closeImport = () => {
+    setShowImport(false);
+    setDraft(null);
+    setPasteMode(false);
+  };
 
   useEffect(() => {
     if (!showImport) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setShowImport(false);
+      if (e.key === 'Escape') closeImport();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -236,25 +290,31 @@ export function App() {
     }
   };
 
-  const pickResume = async (file: File) => {
+  const storeDocument = async (kind: DocumentKind, file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const stored = await sendVault('vault:setDocument', {
+      kind,
+      filename: file.name,
+      // Chrome leaves `type` empty for some uploads; the worker refuses an
+      // unrecognised type, so guessing one here would only move the error.
+      mimeType: file.type,
+      base64: toBase64(bytes),
+    });
+    setDocuments((d) => ({ ...d, [kind]: stored.meta }));
+  };
+
+  const pickDocument = async (kind: DocumentKind, file: File) => {
     setBusy(true);
     setError(null);
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const stored = await sendVault('vault:setResume', {
-        filename: file.name,
-        // Chrome leaves `type` empty for some uploads; the worker refuses an
-        // unrecognised type, so guessing one here would only move the error.
-        mimeType: file.type,
-        base64: toBase64(bytes),
-      });
-      setResume(stored.meta);
+      await storeDocument(kind, file);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
       // Clearing it means picking the same file twice in a row still fires.
-      if (resumeInputRef.current) resumeInputRef.current.value = '';
+      const input = kind === 'resume' ? resumeInputRef.current : coverLetterInputRef.current;
+      if (input) input.value = '';
     }
   };
 
@@ -313,9 +373,15 @@ export function App() {
       // Announced after the refresh, for the reason importCv's summary is: a
       // message that runs ahead of the list below it promises what is not
       // shown yet.
+      const files = [
+        counts.resume ? 'your résumé file' : '',
+        counts.coverLetter ? 'your cover letter file' : '',
+      ]
+        .filter(Boolean)
+        .join(' and ');
       setRestored(
         `Restored ${counts.work} roles, ${counts.education} degrees, ${counts.answers} answers${
-          counts.resume ? ' and your résumé file' : ''
+          files ? ` and ${files}` : ''
         }.`,
       );
     } catch (e) {
@@ -325,13 +391,66 @@ export function App() {
     }
   };
 
-  const importCv = async () => {
+  /** A file becomes a draft to review. Nothing is stored here. */
+  const pickCvFile = async (file: File) => {
+    setBusy(true);
+    setError(null);
+    setImported(null);
+    try {
+      const { kind, lines } = await readCvFile(file);
+      const { warnings, ...cv } = parseCvText(lines);
+      // The same refusal the worker makes, made here first so the person is
+      // told before a form of empty boxes appears. The worker still checks.
+      if (cv.work.length === 0 && cv.education.length === 0) throw new Error(NOT_A_CV);
+      const label = kind === 'pdf' ? 'PDF' : kind === 'docx' ? 'Word' : 'text';
+      setDraft({
+        cv,
+        warnings,
+        source: `${file.name} (${label})`,
+        // A PDF or Word CV is also the file to attach to applications. Stored
+        // on Save, with the rest, and only if nothing is stored yet — a file
+        // chosen on purpose under "Résumé file" is not replaced by accident.
+        file: kind === 'pdf' || kind === 'docx' ? file : null,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      if (cvFileRef.current) cvFileRef.current.value = '';
+    }
+  };
+
+  /** Pasted text becomes a draft too: Markdown by structure, anything else by the reader. */
+  const readPasted = () => {
+    setError(null);
+    setImported(null);
+    const text = markdown;
+    const isMarkdown = /^#\s+\S/m.test(text) && /^##\s+/m.test(text);
+    const parsed = isMarkdown
+      ? { ...parseCvMarkdown(text), warnings: [] as string[] }
+      : parseCvText(text.split(/\r?\n/).map((t) => ({ text: t })));
+    const { warnings, ...cv } = parsed;
+    if (cv.work.length === 0 && cv.education.length === 0) {
+      setError(NOT_A_CV);
+      return;
+    }
+    setDraft({
+      cv,
+      warnings,
+      source: isMarkdown ? 'the pasted Markdown' : 'the pasted text',
+      file: null,
+    });
+  };
+
+  const saveDraft = async () => {
+    if (!draft) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await sendVault('vault:importCv', { markdown });
+      const result = await sendVault('vault:importCv', { cv: draft.cv });
+      if (draft.file && !documents.resume) await storeDocument('resume', draft.file);
       setMarkdown('');
-      setShowImport(false);
+      closeImport();
       // Refresh BEFORE announcing the result. Announcing first says "5 roles,
       // 2 degrees" while the list below still shows what was there before,
       // which is a promise made ahead of the thing it promises. The gate read
@@ -456,39 +575,88 @@ export function App() {
       </Heading>
       {p?.profile?.headline ? <Muted>{p.profile.headline}</Muted> : null}
 
-      {showImport ? (
+      {showImport && draft ? (
+        <Section title="Import a CV · check it first">
+          <CvReview
+            draft={draft}
+            busy={busy}
+            onChange={(cv) => setDraft({ ...draft, cv })}
+            onSave={saveDraft}
+            onCancel={() => setDraft(null)}
+          />
+        </Section>
+      ) : showImport ? (
         <Section title="Import a CV">
           <div style={{ padding: 12 }}>
-            <p style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
-              Paste the contents of <code>perfil/cv.md</code>. It replaces the experience, education
-              and links already stored.
-            </p>
-            <textarea
-              ref={markdownRef}
-              value={markdown}
-              data-testid="cv-markdown"
-              aria-label="CV markdown"
-              rows={6}
-              onInput={(e) => setMarkdown((e.target as HTMLTextAreaElement).value)}
-              style={{
-                width: '100%',
-                padding: 8,
-                borderRadius: 6,
-                border: '1px solid var(--border)',
-                background: 'var(--bg)',
-                color: 'var(--text)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-              }}
-            />
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <Button onClick={importCv} disabled={busy || !markdown.trim()}>
-                {busy ? 'Importing…' : 'Import'}
-              </Button>
-              <Button variant="quiet" onClick={() => setShowImport(false)}>
-                Cancel
-              </Button>
-            </div>
+            {pasteMode ? (
+              <>
+                <p style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                  Paste your CV as text or Markdown. You will see what was read before anything is
+                  stored. It replaces the experience, education and links already here.
+                </p>
+                <textarea
+                  ref={markdownRef}
+                  value={markdown}
+                  data-testid="cv-markdown"
+                  aria-label="CV text"
+                  rows={6}
+                  onInput={(e) => setMarkdown((e.target as HTMLTextAreaElement).value)}
+                  style={{
+                    width: '100%',
+                    padding: 8,
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg)',
+                    color: 'var(--text)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  <Button onClick={readPasted} disabled={busy || !markdown.trim()}>
+                    Read it
+                  </Button>
+                  <Button variant="quiet" onClick={() => setPasteMode(false)} disabled={busy}>
+                    Use a file instead
+                  </Button>
+                  <Button variant="quiet" onClick={closeImport} disabled={busy}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                  Choose the CV you already have, as a PDF or a Word file. It is read here, on this
+                  machine, and shown to you to correct before anything is stored. It replaces the
+                  experience, education and links already here, and becomes the file attached to
+                  applications if none is stored yet.
+                </p>
+                <input
+                  id="cv-file"
+                  data-testid="cv-file"
+                  ref={cvFileRef}
+                  type="file"
+                  aria-label="CV file"
+                  accept={CV_FILE_ACCEPT}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (file) pickCvFile(file);
+                  }}
+                  style={{ font: 'inherit', fontSize: 11, maxWidth: '100%' }}
+                />
+                {busy ? <Muted>Reading the file…</Muted> : null}
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  <Button variant="quiet" onClick={() => setPasteMode(true)} disabled={busy}>
+                    Paste text instead
+                  </Button>
+                  <Button variant="quiet" onClick={closeImport} disabled={busy}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </Section>
       ) : (
@@ -542,26 +710,32 @@ export function App() {
             ) : null}
           </div>
 
-          <div style={{ marginTop: 12 }}>
-            <label
-              htmlFor="resume-file"
-              style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}
-            >
-              Résumé file {resume ? `· ${resume.filename}` : '· none stored'}
-            </label>
-            <input
-              id="resume-file"
-              ref={resumeInputRef}
-              type="file"
-              accept=".pdf,.doc,.docx,.md,.txt,application/pdf,application/msword,text/markdown,text/plain"
-              disabled={busy}
-              onChange={(e) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (file) pickResume(file);
-              }}
-              style={{ marginTop: 4, font: 'inherit', fontSize: 11, maxWidth: '100%' }}
-            />
-          </div>
+          {(['resume', 'cover_letter'] as const).map((kind) => {
+            const id = kind === 'resume' ? 'resume-file' : 'cover-letter-file';
+            const stored = documents[kind];
+            return (
+              <div key={kind} style={{ marginTop: 12 }}>
+                <label
+                  htmlFor={id}
+                  style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}
+                >
+                  {DOCUMENT_LABELS[kind]} {stored ? `· ${stored.filename}` : '· none stored'}
+                </label>
+                <input
+                  id={id}
+                  ref={kind === 'resume' ? resumeInputRef : coverLetterInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.md,.txt,application/pdf,application/msword,text/markdown,text/plain"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (file) pickDocument(kind, file);
+                  }}
+                  style={{ marginTop: 4, font: 'inherit', fontSize: 11, maxWidth: '100%' }}
+                />
+              </div>
+            );
+          })}
 
           {report?.frameNote ? (
             <p
@@ -648,29 +822,56 @@ export function App() {
           written only into a field that asks for that exact thing. Nothing here is ever guessed
           from your CV.
         </Muted>
-        {SCREENING_PROMPTS.map(({ kind, label, hint }) => (
-          <label key={kind} style={{ display: 'block', marginTop: 10 }}>
-            <span style={{ fontSize: 12, color: 'var(--text)' }}>{label}</span>
-            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>
-              {hint}
-            </span>
-            <input
-              data-testid={`answer-${kind}`}
-              value={answers[kind] ?? ''}
-              disabled={busy}
-              onInput={(e) =>
-                setAnswers({ ...answers, [kind]: (e.target as HTMLInputElement).value })
-              }
-              onBlur={(e) => {
-                const answer = (e.target as HTMLInputElement).value;
-                sendVault('vault:setScreeningAnswer', { kind, answer })
-                  .then(() => refresh())
-                  .catch((err: Error) => setError(err.message));
-              }}
-              style={{ width: '100%', marginTop: 4, padding: '6px 8px', boxSizing: 'border-box' }}
-            />
-          </label>
-        ))}
+        {SCREENING_PROMPTS.map(({ kind, label, hint, multiline }) => {
+          const onInput = (e: Event) =>
+            setAnswers({ ...answers, [kind]: (e.target as HTMLInputElement).value });
+          const onBlur = (e: Event) => {
+            const answer = (e.target as HTMLInputElement).value;
+            sendVault('vault:setScreeningAnswer', { kind, answer })
+              .then(() => refresh())
+              .catch((err: Error) => setError(err.message));
+          };
+          const style = {
+            width: '100%',
+            marginTop: 4,
+            padding: '6px 8px',
+            boxSizing: 'border-box' as const,
+          };
+          return (
+            <label
+              key={kind}
+              htmlFor={`answer-${kind}`}
+              style={{ display: 'block', marginTop: 10 }}
+            >
+              <span style={{ fontSize: 12, color: 'var(--text)' }}>{label}</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>
+                {hint}
+              </span>
+              {multiline ? (
+                <textarea
+                  id={`answer-${kind}`}
+                  data-testid={`answer-${kind}`}
+                  value={answers[kind] ?? ''}
+                  disabled={busy}
+                  rows={5}
+                  onInput={onInput}
+                  onBlur={onBlur}
+                  style={{ ...style, font: 'inherit', fontSize: 12 }}
+                />
+              ) : (
+                <input
+                  id={`answer-${kind}`}
+                  data-testid={`answer-${kind}`}
+                  value={answers[kind] ?? ''}
+                  disabled={busy}
+                  onInput={onInput}
+                  onBlur={onBlur}
+                  style={style}
+                />
+              )}
+            </label>
+          );
+        })}
       </Section>
 
       {p?.contact ? (
@@ -773,7 +974,8 @@ export function App() {
                 : ''}
               ? It has {pendingBackup.backup.work.length} roles,{' '}
               {Object.keys(pendingBackup.backup.screeningAnswers).length} answers
-              {pendingBackup.backup.resume ? ' and a résumé file' : ' and no résumé file'}.
+              {pendingBackup.backup.resume ? ' and a résumé file' : ' and no résumé file'}
+              {pendingBackup.backup.coverLetter ? ', plus a cover letter file' : ''}.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <Button onClick={restoreBackup} disabled={busy}>

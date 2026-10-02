@@ -24,6 +24,13 @@ same browser profile, so a copy of the *profile* is not. That trade is
 deliberate and written up in
 [`03-security.md`](docs/03-security.md#what-dropping-the-passphrase-cost).
 
+**Start from the CV you have.** Pick your PDF or Word file in the panel; it
+is read on this machine and shown to you, field by field, to correct before
+anything is stored. Spanish and English CVs, one column or two. The same file
+becomes the résumé attached to applications. A cover letter you write is
+stored once and typed, or attached as a file, wherever a form asks — never
+generated. See [`04-phases.md`](docs/04-phases.md#the-cv-from-the-file-you-already-have).
+
 **Back it up.** Removing the extension deletes the vault and its key. The
 panel's *Backup* section exports everything you entered to one file and
 restores it into this browser or a new one. The file is not encrypted — see
@@ -194,8 +201,8 @@ The risk lands on your account, not on this project. See
 ```bash
 pnpm install
 pnpm build            # then load .output/chrome-mv3 as an unpacked extension
-pnpm check            # typecheck, lint, 256 unit tests, and the invariant guard
-node tests/e2e/gate.cjs   # the Phase 1 and 2 gates, against a real browser
+pnpm check            # typecheck, lint, 406 unit tests, and the invariant guard
+node tests/e2e/gate.cjs   # 121 checks against a real browser, every phase so far
 ```
 
 ## License

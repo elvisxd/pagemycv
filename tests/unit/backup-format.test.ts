@@ -45,6 +45,11 @@ function sample(): Backup {
     education: [{ institution: 'Home', degree: null, field: null, startedOn: null, endedOn: null }],
     links: [{ kind: 'github', url: 'https://github.com/ada' }],
     resume: { filename: 'cv.pdf', mimeType: 'application/pdf', base64: btoa('%PDF-1.7 fake') },
+    coverLetter: {
+      filename: 'letter.pdf',
+      mimeType: 'application/pdf',
+      base64: btoa('%PDF-1.7 letter'),
+    },
     screeningAnswers: { notice_period: 'Two weeks', relocation_ok: 'No' },
   };
 }
@@ -104,6 +109,22 @@ describe('a backup file', () => {
     ).toThrow(/résumé .* damaged/);
   });
 
+  it('refuses a cover letter that cannot be decoded, for the same reason', () => {
+    expect(
+      withChange((b) => ((b.coverLetter as Record<string, string>).base64 = '%%% not base64')),
+    ).toThrow(/cover letter .* damaged/);
+  });
+
+  it('reads a file written before the cover letter existed: the key is simply absent', () => {
+    // Not a version bump. A backup made last week must not become one that
+    // "needs updating" because a field was added after it was written.
+    const parsed = withChange((b) => {
+      b.coverLetter = undefined;
+    })();
+    expect(parsed.coverLetter).toBeNull();
+    expect(parsed.resume?.filename).toBe('cv.pdf');
+  });
+
   it('refuses an empty backup, because a restore replaces what is there', () => {
     expect(
       withChange((b) => {
@@ -111,8 +132,19 @@ describe('a backup file', () => {
         b.work = [];
         b.education = [];
         b.resume = null;
+        b.coverLetter = null;
       }),
     ).toThrow(/empty/);
+  });
+
+  it('a cover letter alone is not an empty backup', () => {
+    const parsed = withChange((b) => {
+      b.profile = null;
+      b.work = [];
+      b.education = [];
+      b.resume = null;
+    })();
+    expect(parsed.coverLetter?.filename).toBe('letter.pdf');
   });
 
   it('accepts a backup with no résumé and no contact', () => {

@@ -244,6 +244,18 @@ somebody finds another. The runtime half in `gate.cjs`, which watches real
 requests leave the browser, is the one that does not depend on us having
 thought of the transport.
 
+### A file the person chose is still untrusted input
+
+Importing a CV from a PDF or a Word file means parsing a file in the
+extension. It happens in the **side panel**, an extension page that holds no
+key: the vault key is in the service worker's storage and the decrypted CV in
+the dedicated worker, so a file crafted to misbehave inside pdf.js finds
+nothing there worth having, and the worst case is a panel that has to be
+reopened. pdf.js is given no URL to fetch from, and the Word reader is the
+browser's own inflater and XML parser. The runtime half of invariant 5 — the
+gate watching every request leave the browser — now covers a PDF and a Word
+import too, because the gate performs both.
+
 ## Encryption at rest
 
 **What is encrypted.** Sensitive columns, not the whole file. Column-level

@@ -5,21 +5,28 @@
 // simply does not answer it.
 import { defineExtensionMessaging } from '@webext-core/messaging';
 import type { Backup } from '../backup/format';
-import type { ProfileView, ResumeMeta, VaultState } from '../db/schema';
-import type { FillReport, ScreeningAnswers } from '../fill/types';
+import type { DocumentsMeta, ProfileView, ResumeMeta, VaultState } from '../db/schema';
+import type { DocumentKind, FillReport, ScreeningAnswers } from '../fill/types';
+import type { ParsedCv } from '../import/cv-markdown';
 
 export interface VaultProtocol {
   'vault:state'(): VaultState;
   /** One time, for a vault that predates the stored key. */
   'vault:convert'(data: { passphrase: string }): VaultState;
   'vault:profile'(): ProfileView;
-  'vault:importCv'(data: { markdown: string }): { imported: true; counts: Record<string, number> };
-  'vault:resumeMeta'(): ResumeMeta | null;
+  /** The CV as the person approved it in the review step. See db:importCv. */
+  'vault:importCv'(data: { cv: ParsedCv }): { imported: true; counts: Record<string, number> };
+  'vault:documents'(): DocumentsMeta;
   'vault:exportBackup'(): Backup;
   'vault:importBackup'(data: { text: string }): { restored: true; counts: Record<string, number> };
   'vault:screeningAnswers'(): ScreeningAnswers;
   'vault:setScreeningAnswer'(data: { kind: string; answer: string }): { saved: true };
-  'vault:setResume'(data: { filename: string; mimeType: string; base64: string }): {
+  'vault:setDocument'(data: {
+    kind: DocumentKind;
+    filename: string;
+    mimeType: string;
+    base64: string;
+  }): {
     stored: true;
     meta: ResumeMeta;
   };

@@ -517,6 +517,66 @@ to open the form's own page instead.
 
 ---
 
+## The CV from the file you already have
+
+Not a phase. Asked for: *"actualmente está pidiendo un md pero los usuarios
+no usan eso... solo PDF o DOC"*, and then: the cover letter too, when the
+form asks for one.
+
+The Markdown importer read **structure** — `# Name`, `## Experience`,
+`### Title — Employer`, a line of dates in italics — and a PDF has none. What
+a file has is words and shapes, which are the same in every CV: a short line
+that says *Experience* or *Experiencia*; a line with a date range near a
+line with a title; something that looks like an email. So the work split
+three ways:
+
+- **Getting the text out.** PDF through pdf.js, bundled, with its worker
+  inside the extension and configured to fetch nothing; one module
+  (`src/import/pdf-text.ts`) and a guard rule, like every other door. A
+  two-column CV read by line alone interleaves its columns, so the reader
+  looks for a vertical gutter no text crosses and reads one side before the
+  other (`spikes/cv-file/`). Word files cost **no dependency**: a `.docx` is a
+  zip with one XML entry, and Chrome has the inflater and the XML parser.
+  The old `.doc` is refused with the way out.
+- **Reading it.** `src/import/cv-text.ts`, heuristic and bilingual, with the
+  shapes it handles pinned in `tests/unit/cv-text.test.ts`: title-then-dates,
+  dates-then-title, title and employer on two lines, employer before title,
+  "Marzo 2023 – Actualidad", a phone with no label, a CV with no section
+  titles at all. It returns what it could not find as warnings rather than
+  as silence.
+- **Showing it before storing it.** The reader guesses, and a wrong guess
+  stored is a wrong value typed into an application later. So nothing it
+  returns reaches the vault until it has been shown as an editable form and
+  Save pressed. The gate edits a field by hand before saving and asserts the
+  vault holds the edit. A PDF or Word CV also becomes the file attached to
+  applications, if none was stored yet. Pasted Markdown goes through the same
+  form.
+
+**The cover letter** was refused outright before: *"writing a generic cover
+letter on the user's behalf is worse than leaving it empty"*. That stays true
+of a **generated** one, and nothing here generates anything. One the person
+wrote and stored is theirs, so it joined the screening kinds — it fills from
+what they typed or it does not fill at all — and a form that wants a *file*
+gets the stored cover letter file, never the résumé. Both ride in the backup;
+the file as an optional field, so last week's backup still restores.
+
+**Gate.** Upload a one-column PDF, a two-column Spanish PDF and a Word file
+through the panel in a real browser; see the right fields proposed; change
+one, save, see the change stored; cancel the others and see the vault
+untouched; see a `.doc` refused with the message. Then store a cover letter
+as text and as a file and watch the generic form take both, having asserted
+the same boxes stayed empty while none was stored. **Met:** gate 121 checks.
+Removing the gutter rule fails exactly the two-column check, with the columns
+interleaved in its detail.
+
+**Not measured.** A Word file made by Word itself — the fixture follows the
+format and the reader ignores every part Word adds, but one real file is the
+test that closes it. And accuracy on CVs this was not written against: two
+samples calibrate the heuristics; the review step is what makes that
+acceptable.
+
+---
+
 ## Deliberately not planned
 
 Ranking, scoring, feed ingestion and application tracking. All four already work

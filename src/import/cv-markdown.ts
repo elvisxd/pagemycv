@@ -70,13 +70,37 @@ const MONTHS: Record<string, string> = {
   november: '11',
   dec: '12',
   december: '12',
+  // Spanish. A CV written in Caracas says "Marzo 2023 – Actualidad", and the
+  // file importer hands those words to the same reader as the Markdown one.
+  ene: '01',
+  enero: '01',
+  febrero: '02',
+  marzo: '03',
+  abr: '04',
+  abril: '04',
+  mayo: '05',
+  junio: '06',
+  julio: '07',
+  ago: '08',
+  agosto: '08',
+  septiembre: '09',
+  setiembre: '09',
+  octubre: '10',
+  noviembre: '11',
+  dic: '12',
+  diciembre: '12',
 };
+
+/** The words a CV uses for "still here", in the two languages this reads. */
+export const CURRENT_WORDS =
+  /^(present|current|now|today|ongoing|actualidad|actual|presente|hoy|a la fecha)$/i;
 
 /** "June 2023" becomes 2023-06. "2019" stays 2019. "Present" becomes null. */
 export function parseDate(raw: string): string | null {
   const s = raw.trim();
-  if (!s || /^present$/i.test(s) || /^current$/i.test(s)) return null;
-  const withMonth = s.match(/^([A-Za-z]+)\.?\s+(\d{4})$/);
+  if (!s || CURRENT_WORDS.test(s)) return null;
+  // "Marzo de 2023" and "March, 2023" both mean the same month.
+  const withMonth = s.match(/^([A-Za-z\u00C0-\u017F]+)\.?,?\s+(?:de\s+)?(\d{4})$/);
   if (withMonth) {
     const month = MONTHS[(withMonth[1] ?? '').toLowerCase()];
     if (month) return `${withMonth[2]}-${month}`;
@@ -100,16 +124,35 @@ export function parseRange(raw: string): { startedOn: string | null; endedOn: st
   return { startedOn: parseDate(parts[0] ?? ''), endedOn: parseDate(parts[1] ?? '') };
 }
 
-function splitName(full: string): { first: string; last: string } {
+export function splitName(full: string): { first: string; last: string } {
   const parts = full.trim().split(/\s+/);
   if (parts.length === 1) return { first: parts[0] ?? '', last: '' };
   return { first: parts[0] ?? '', last: parts.slice(1).join(' ') };
 }
 
-function linkKind(url: string): string {
+export function linkKind(url: string): string {
   if (/linkedin\.com/i.test(url)) return 'linkedin';
   if (/github\.com/i.test(url)) return 'github';
   return 'portfolio';
+}
+
+/**
+ * A recognisable top-level domain, or an explicit scheme, followed by a path.
+ * The old pattern matched any word.word/word, so prose like "shipped
+ * v2.1/beta" or "Node.js/22 runtime" was stored as a link and rendered as one.
+ */
+const URL_RE =
+  /(?:https?:\/\/[\w-]+(?:\.[\w-]+)+|(?:[\w-]+\.)+(?:com|org|net|io|dev|app|me|co|ai|sh|gg|xyz|es|ar|ve|uk|de))\/[\w\-./]*/gi;
+
+/** Every link in a piece of text, normalised to https, images and pages dropped. */
+export function extractLinks(text: string): ParsedLink[] {
+  const out: ParsedLink[] = [];
+  for (const m of text.matchAll(URL_RE)) {
+    const url = `https://${(m[0] ?? '').replace(/^https?:\/\//, '')}`.replace(/[.,]$/, '');
+    if (/\.(md|png|jpg|html)$/i.test(url)) continue;
+    out.push({ kind: linkKind(url), url });
+  }
+  return out;
 }
 
 function sectionOf(lines: string[], heading: RegExp): string[] {
@@ -150,13 +193,10 @@ export function parseCvMarkdown(markdown: string): ParsedCv {
     // A recognisable top-level domain, or an explicit scheme. The old pattern
     // matched any word.word/word, so prose like "shipped v2.1/beta" or
     // "Node.js/22 runtime" was stored as a link and rendered as one.
-    const URL_RE =
-      /(?:https?:\/\/[\w-]+(?:\.[\w-]+)+|(?:[\w-]+\.)+(?:com|org|net|io|dev|app|me|co|ai|sh|gg|xyz|es|ar|ve|uk|de))\/[\w\-./]*/gi;
-    for (const m of line.matchAll(URL_RE)) {
-      const url = `https://${(m[0] ?? '').replace(/^https?:\/\//, '')}`.replace(/[.,]$/, '');
-      if (/\.(md|png|jpg|html)$/i.test(url) || seen.has(url)) continue;
-      seen.add(url);
-      links.push({ kind: linkKind(url), url });
+    for (const link of extractLinks(line)) {
+      if (seen.has(link.url)) continue;
+      seen.add(link.url);
+      links.push(link);
     }
   }
 

@@ -114,7 +114,10 @@ CREATE TABLE link (
 );
 
 -- ─── document ─────────────────────────────────────────────────────────────
--- The CV PDF itself, stored as a blob so the file input can be fed offline.
+-- The files attached to applications, stored so a file input can be fed
+-- offline. One row per kind — `resume`, `cover_letter` — replaced on upload;
+-- the ids are `<kind>-default`. A PDF or Word CV imported through the panel
+-- becomes the `resume` row too, if none was stored yet.
 CREATE TABLE document (
   id              TEXT    PRIMARY KEY,
   kind            TEXT    NOT NULL,   -- resume | cover_letter | portfolio
@@ -280,7 +283,12 @@ reading and writing.
   guess. Unknown screening questions are refused too, and a backup from a
   newer PageMyCV says so rather than calling itself damaged.
 - **The résumé passes the same rules as an upload** — type allowlist, 8 MB —
-  because a backup file is just another way in.
+  because a backup file is just another way in. So does the cover letter file.
+- **The cover letter travels twice**: as the `cover_letter` screening answer
+  (text) and as `coverLetter` (the file). The file field was added after
+  version 1 shipped, as an **optional** field rather than a version 2: a file
+  written before it existed simply has no cover letter, and refusing it would
+  turn last week's backup into one that "needs updating" for nothing.
 - The key does not travel. A restore goes into whichever vault is open and is
   sealed again under its key.
 - The export is never uploaded anywhere by the extension. It is saved from the

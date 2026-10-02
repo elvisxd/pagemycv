@@ -1,4 +1,5 @@
 /** Shared row and view types. No SQL here; the tables live in migrations/. */
+import type { DocumentKind } from '../fill/types';
 
 /**
  * 'absent'          nothing on disk yet; the next open creates it
@@ -64,11 +65,14 @@ export interface SensitiveFieldMeta {
   hasValue: boolean;
 }
 
-/** The stored resume, without its bytes. */
+/** A stored file, without its bytes. */
 export interface ResumeMeta {
   filename: string;
   mimeType: string;
 }
+
+/** Which files are stored, by document. Absent means none. */
+export type DocumentsMeta = Partial<Record<DocumentKind, ResumeMeta>>;
 
 /** What the side panel is allowed to see. Sensitive values are never included. */
 export interface ProfileView {

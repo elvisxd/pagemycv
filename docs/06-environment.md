@@ -17,6 +17,7 @@ Every row below was re-checked against the current registry on 26 September
 | Database | `@sqlite.org/sqlite-wasm`, `opfs-sahpool` VFS, driven directly | Do not use a wrapper. See below. |
 | Passphrase KDF | `hash-wasm` ← added | Argon2id, about 11 KB. `@openpgp/argon2id` does not exist on npm. |
 | Messaging | `@webext-core/messaging` v4 ← added | Typed messages. No namespace option for the extension messenger, so channels are separated by key prefix. |
+| PDF text | `pdfjs-dist` 6.3.289 ← added, pinned | Mozilla's reader, bundled with its worker; one module may import it. Word files need nothing: see below. |
 | Lint and format | Biome | One package, one binary set, lint and format together |
 | Unit tests | Vitest, with WXT's bundled `@webext-core/fake-browser` | An in-memory `chrome.*`, so most logic needs no browser |
 | End-to-end | Playwright | With one real limitation, below |
@@ -72,6 +73,22 @@ typescript-eslint's 61. But replacing Biome means three packages instead of one,
 44 platform binaries instead of 8, and `oxfmt` is still alpha, so Prettier would
 have to stay. Dependency surface is part of the threat model here. Revisit when
 `oxfmt` reaches 1.0.
+
+### Added: pdf.js, and what it weighs
+
+The side panel bundle went from 34 KB to 493 KB and gained a 1.19 MB worker;
+the built extension from 1.5 MB to 3.15 MB. That is the price of reading the
+file people actually have, and it is paid once, on disk, by an extension that
+is loaded unpacked. No alternative was close: there is no pure-TypeScript PDF
+text extractor worth trusting with a stranger's CV, and pdf.js is the one
+Firefox ships. It is pinned to the exact version, imported from one module
+(`src/import/pdf-text.ts`, enforced by the guard), configured with no font or
+character-map URLs, and its worker is a bundled asset rather than anything
+fetched. Nothing loads code at runtime.
+
+`.docx` cost nothing. It is a zip holding `word/document.xml`, and the browser
+already has `DecompressionStream('deflate-raw')` and `DOMParser`. Measured in
+`spikes/cv-file/` before the dependency question was even asked.
 
 ### Two limitations to design around
 

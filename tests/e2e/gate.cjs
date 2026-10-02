@@ -142,6 +142,56 @@ const RESUME_BYTES = Buffer.concat([
 ]);
 const RESUME_NAME = 'elvis-rey-cv.pdf';
 
+// The CV as the files people actually have. The one-column HTML says the same
+// things as fixture-cv.md, so the file path is asserted against the same
+// values; the two-column one is in Spanish, with a labelled phone in a side
+// column, which is the layout that interleaves if columns are not untangled.
+// PDFs are printed by Chromium at run time (see makePdf); the .docx is built
+// entry by entry (tests/e2e/make-docx.cjs). No binary is committed.
+const CV_ONE_COL_HTML = path.join(__dirname, '../fixtures/cv-one-col.html');
+const CV_TWO_COL_HTML = path.join(__dirname, '../fixtures/cv-two-col.html');
+const { makeCvDocx } = require('./make-docx.cjs');
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+/** A cover letter the person wrote. Stored as text AND as a file. */
+const LETTER = 'Dear hiring team,\n\nI would like to apply. My work on automation is below.\n\nAda';
+const LETTER_BYTES = Buffer.concat([
+  Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n'),
+  Buffer.from(Array.from({ length: 256 }, (_, i) => (i * 7) % 251)),
+]);
+const LETTER_NAME = 'ada-cover-letter.pdf';
+
+/**
+ * Print an HTML fixture to PDF with a browser of its own. Not the extension's
+ * context: a file:// navigation there would count as a request leaving the
+ * extension origin, and the gate asserts none does.
+ */
+async function makePdf(htmlPath) {
+  const browser = await chromium.launch({
+    channel: 'chromium',
+    headless: true,
+    args: ['--no-sandbox'],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`file://${htmlPath}`);
+    return await page.pdf({ format: 'A4', printBackground: true });
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Import pasted text through the panel: open, paste, read, save. */
+async function importPasted(page, text) {
+  await page.getByRole('button', { name: /Import your CV|Re-import CV/ }).click();
+  await page.getByRole('button', { name: 'Paste text instead' }).click();
+  await page.getByTestId('cv-markdown').fill(text);
+  await page.getByRole('button', { name: 'Read it' }).click();
+  await page.getByTestId('cv-review').waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: 'Save to the vault' }).click();
+  await page.getByTestId('import-result').waitFor({ timeout: 60000 });
+}
+
 const results = {};
 const offOrigin = [];
 /** Fixture requests the harness itself fulfils from disk. Never networked. */
@@ -268,10 +318,7 @@ async function main() {
     (await page.getByRole('button', { name: 'Lock' }).count()) === 0,
   );
 
-  await page.getByRole('button', { name: /Import your CV|Re-import CV/ }).click();
-  await page.getByTestId('cv-markdown').fill(CV);
-  await page.getByRole('button', { name: 'Import' }).click();
-  await page.getByTestId('import-result').waitFor({ timeout: 60000 });
+  await importPasted(page, CV);
   const importSummary = await page.getByTestId('import-result').innerText();
   const roleCount = Number((importSummary.match(/(\d+) roles/) || [])[1] || 0);
   check('cv imported', roleCount >= 5, importSummary);
@@ -301,10 +348,11 @@ async function main() {
   // A CV that does not parse must change nothing. This is the data-loss path:
   // importCv deletes before it inserts.
   await page.getByRole('button', { name: /Re-import CV/ }).click();
+  await page.getByRole('button', { name: 'Paste text instead' }).click();
   await page
     .getByTestId('cv-markdown')
     .fill('Dear Hiring Manager,\n\nI am interested.\n\nRegards\n');
-  await page.getByRole('button', { name: 'Import' }).click();
+  await page.getByRole('button', { name: 'Read it' }).click();
   const refusal = await page
     .getByRole('alert')
     .innerText()
@@ -429,15 +477,171 @@ async function main() {
   // filled, reviewed, and never submitted. Zero sensitive fields written and
   // zero hidden fields written are the two that decide it.
 
+  // ── The CV as a file: PDF and Word, read here, reviewed, then saved ──
+  //
+  // This is where pdf.js is measured inside the extension page — the spike
+  // ran it in Node — and where the review step is proven to be the thing
+  // that gets stored: one field is changed by hand before Save and the
+  // change is what the vault ends up holding.
+  const onePdf = await makePdf(CV_ONE_COL_HTML);
+  await page.getByRole('button', { name: /Re-import CV/ }).click();
+  await page.setInputFiles('[data-testid="cv-file"]', {
+    name: 'ada-cv.pdf',
+    mimeType: 'application/pdf',
+    buffer: onePdf,
+  });
+  await page.getByTestId('cv-review').waitFor({ timeout: 60000 });
+  const read = async (id) => page.getByTestId(id).inputValue();
+  check(
+    'cv file: a one-column PDF is read into name, contact and roles for review',
+    (await read('cv-legalFirst')) === EXPECT.first &&
+      (await read('cv-legalLast')) === EXPECT.last &&
+      (await read('cv-email')) === EXPECT.email &&
+      (await read('cv-phone')) === EXPECT.phone &&
+      (await read('cv-city')) === 'Orlando' &&
+      (await read('cv-work-0-title')) === 'Founder & Full-Stack Developer' &&
+      (await read('cv-work-0-employer')) === EXPECT.employer &&
+      (await page.locator('[data-testid^="cv-work-"][data-testid$="-title"]').count()) === 3 &&
+      (await read('cv-education-0-degree')) === 'B.Sc. Systems Engineering',
+    JSON.stringify({
+      first: await read('cv-legalFirst'),
+      email: await read('cv-email'),
+      phone: await read('cv-phone'),
+      city: await read('cv-city'),
+      title: await read('cv-work-0-title'),
+      employer: await read('cv-work-0-employer'),
+    }),
+  );
+  check(
+    'cv file: the reader had nothing to warn about on it',
+    (await page.getByTestId('cv-warnings').count()) === 0,
+    await page
+      .getByTestId('cv-warnings')
+      .innerText()
+      .catch(() => ''),
+  );
+  // Nothing is stored yet: the profile on screen is still the one from the
+  // Markdown import, and the review form is a proposal.
+  check(
+    'cv file: picking the file stored nothing — the headline is still the old one',
+    (await page.locator('body').innerText()).includes('Senior Full-Stack Engineer') &&
+      !(await page.locator('body').innerText()).includes('Edited in review'),
+  );
+  await page.getByTestId('cv-headline').fill('Edited in review');
+  await page.getByRole('button', { name: 'Save to the vault' }).click();
+  await page.getByTestId('import-result').waitFor({ timeout: 60000 });
+  const afterPdf = await page.locator('body').innerText();
+  check(
+    'cv file: Save stores what the review says, including the hand-edited field',
+    afterPdf.includes('Edited in review') &&
+      /EXPERIENCE · 3/i.test(afterPdf) &&
+      /3 roles, 2 degrees, 3 links/.test(await page.getByTestId('import-result').innerText()),
+    (await page.getByTestId('import-result').innerText()).slice(0, 80),
+  );
+  check(
+    'cv file: the PDF itself became the résumé file, since none was stored',
+    /Résumé file · ada-cv\.pdf/.test(afterPdf),
+    (afterPdf.match(/Résumé file[^\n]*/) ?? [''])[0],
+  );
+
+  // A two-column Spanish CV: the phone is labelled, in a side column, and
+  // the dates say "Marzo 2023 – Actualidad". Reviewed and then cancelled, so
+  // the board checks below run against Ada's profile.
+  const twoPdf = await makePdf(CV_TWO_COL_HTML);
+  await page.getByRole('button', { name: /Re-import CV/ }).click();
+  await page.setInputFiles('[data-testid="cv-file"]', {
+    name: 'elvis-cv.pdf',
+    mimeType: 'application/pdf',
+    buffer: twoPdf,
+  });
+  await page.getByTestId('cv-review').waitFor({ timeout: 60000 });
+  check(
+    'cv file: a two-column Spanish PDF reads column by column, in Spanish',
+    (await read('cv-legalFirst')) === 'Elvis' &&
+      (await read('cv-phone')) === '+58 412 555 0199' &&
+      (await read('cv-city')) === 'Caracas' &&
+      (await read('cv-work-0-title')) === 'Desarrollador Senior' &&
+      (await read('cv-work-0-employer')) === 'Nesty C.A.' &&
+      (await read('cv-work-0-startedOn')) === '2023-03' &&
+      (await read('cv-work-0-endedOn')) === '' &&
+      (await read('cv-education-0-institution')) === 'Universidad de Margarita',
+    JSON.stringify({
+      first: await read('cv-legalFirst'),
+      phone: await read('cv-phone'),
+      city: await read('cv-city'),
+      title: await read('cv-work-0-title'),
+      employer: await read('cv-work-0-employer'),
+      from: await read('cv-work-0-startedOn'),
+      to: await read('cv-work-0-endedOn'),
+      school: await read('cv-education-0-institution'),
+    }),
+  );
+  // Cancel on the review goes back to the file picker, so another file can
+  // be tried; the picker's own Cancel closes the import.
+  await page.getByRole('button', { name: 'Cancel' }).first().click();
+  await page.getByTestId('cv-file').waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  check(
+    'cv file: Cancel keeps the vault as it was',
+    (await page.locator('body').innerText()).includes('Lovelace') &&
+      !(await page.locator('body').innerText()).includes('Elvis Rey'),
+  );
+
+  // The same CV as a Word file, with no dependency behind the reading.
+  await page.getByRole('button', { name: /Re-import CV/ }).click();
+  await page.setInputFiles('[data-testid="cv-file"]', {
+    name: 'ada-cv.docx',
+    mimeType: DOCX_MIME,
+    buffer: makeCvDocx(),
+  });
+  await page.getByTestId('cv-review').waitFor({ timeout: 60000 });
+  check(
+    'cv file: a Word document reads to the same fields as the PDF',
+    (await read('cv-legalFirst')) === EXPECT.first &&
+      (await read('cv-email')) === EXPECT.email &&
+      (await read('cv-work-0-title')) === 'Founder & Full-Stack Developer' &&
+      (await read('cv-work-0-employer')) === EXPECT.employer &&
+      (await read('cv-work-2-startedOn')) === '2019-05' &&
+      (await read('cv-education-1-institution')) === 'María Auxiliadora II' &&
+      (await page.getByTestId('cv-warnings').count()) === 0,
+    JSON.stringify({
+      first: await read('cv-legalFirst'),
+      title: await read('cv-work-0-title'),
+      employer: await read('cv-work-0-employer'),
+      from: await read('cv-work-2-startedOn'),
+      school: await read('cv-education-1-institution'),
+    }),
+  );
+  await page.getByRole('button', { name: 'Cancel' }).first().click();
+  await page.getByTestId('cv-file').waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+
+  // Old Word: refused with the way out, and nothing read.
+  await page.getByRole('button', { name: /Re-import CV/ }).click();
+  await page.setInputFiles('[data-testid="cv-file"]', {
+    name: 'old-cv.doc',
+    mimeType: 'application/msword',
+    buffer: Buffer.from('\xd0\xcf\x11\xe0 not really', 'latin1'),
+  });
+  const docRefusal = await page
+    .getByRole('alert')
+    .innerText({ timeout: 30000 })
+    .catch(() => '(no message)');
+  check(
+    'cv file: a .doc is refused and told to save as .docx or PDF',
+    /old Word format/.test(docRefusal) &&
+      /Save As/.test(docRefusal) &&
+      (await page.getByTestId('cv-review').count()) === 0,
+    docRefusal,
+  );
+  await page.getByRole('button', { name: 'Cancel' }).click();
+
   // Phase 2's value assertions run against the fixture CV, deliberately, even
   // when a real one was used above. Run 1 proves the import works on the real
   // thing; asserting here that a particular email reaches a particular box
   // would otherwise depend on what one person happens to have in their CV,
   // and a gate that passes or fails on that is testing the wrong machine.
-  await page.getByRole('button', { name: /Re-import CV/ }).click();
-  await page.getByTestId('cv-markdown').fill(FIXTURE_CV);
-  await page.getByRole('button', { name: 'Import' }).click();
-  await page.getByTestId('import-result').waitFor({ timeout: 60000 });
+  await importPasted(page, FIXTURE_CV);
   await page.waitForFunction(() => document.body.innerText.includes('Lovelace'), null, {
     timeout: 30000,
   });
@@ -1023,7 +1227,47 @@ async function main() {
     /Workable/.test(generic.review ?? generic.report ?? ''),
     (generic.review ?? generic.report ?? '').slice(0, 120),
   );
+  check(
+    'generic: a cover letter FILE input is left alone while no file is stored',
+    (un['candidate[letter_file]'] ?? '') === '',
+    `"${un['candidate[letter_file]']}"`,
+  );
   await generic.job.close();
+
+  // ── The cover letter: yours, stored once, or nothing ────────────────
+  //
+  // Every check above ran with no letter stored and asserted the box stayed
+  // empty. Now one is stored, as text and as a file, and the same form is
+  // filled again: the box gets the text, the file input gets the file, and
+  // the résumé input still gets the résumé.
+  await page.getByTestId('answer-cover_letter').fill(LETTER);
+  await page.getByTestId('answer-cover_letter').blur();
+  await page.setInputFiles('#cover-letter-file', {
+    name: LETTER_NAME,
+    mimeType: 'application/pdf',
+    buffer: LETTER_BYTES,
+  });
+  await page.waitForFunction((name) => document.body.innerText.includes(name), LETTER_NAME, {
+    timeout: 30000,
+  });
+  await page.waitForTimeout(600);
+  const lettered = await fillBoard('generic');
+  const lv2 = lettered.state.values;
+  check(
+    'cover letter: the box is filled with the letter YOU wrote, once one is stored',
+    lv2['candidate[letter]'] === LETTER,
+    JSON.stringify(lv2['candidate[letter]'] ?? '').slice(0, 80),
+  );
+  check(
+    'cover letter: the file input gets the cover letter file, and the résumé input the résumé',
+    lv2['candidate[letter_file]'] === LETTER_NAME && lv2['candidate[attachment]'] === RESUME_NAME,
+    JSON.stringify({ letter: lv2['candidate[letter_file]'], resume: lv2['candidate[attachment]'] }),
+  );
+  check(
+    'cover letter: the review lists both attachments by name',
+    (lettered.review ?? '').includes(LETTER_NAME) && (lettered.review ?? '').includes(RESUME_NAME),
+  );
+  await lettered.job.close();
 
   // ── The two refusals, which used to be one ──────────────────────────
   //
@@ -1141,6 +1385,16 @@ async function main() {
     'backup: the résumé inside is byte for byte the one uploaded',
     Buffer.from(backup.resume?.base64 ?? '', 'base64').equals(RESUME_BYTES),
   );
+  check(
+    'backup: it carries the cover letter, as text and as the file',
+    backup.screeningAnswers?.cover_letter === LETTER &&
+      backup.coverLetter?.filename === LETTER_NAME &&
+      Buffer.from(backup.coverLetter?.base64 ?? '', 'base64').equals(LETTER_BYTES),
+    JSON.stringify({
+      file: backup.coverLetter?.filename,
+      text: (backup.screeningAnswers?.cover_letter ?? '').slice(0, 20),
+    }),
+  );
   // Nothing sensitive can be stored yet, and this file is not encrypted.
   // tests/unit/backup-coverage.test.ts holds that line in the code; this
   // holds it in the file that actually came out.
@@ -1208,6 +1462,12 @@ async function main() {
       restoredBody.includes(RESUME_NAME) &&
       (await page.getByTestId('answer-notice_period').inputValue()) === '1 month' &&
       (await page.getByTestId('answer-preferred_name').inputValue()) === 'Ada',
+    (await page.getByTestId('backup-result').innerText()).slice(0, 120),
+  );
+  check(
+    'restore: and so is the cover letter, text and file',
+    restoredBody.includes(LETTER_NAME) &&
+      (await page.getByTestId('answer-cover_letter').inputValue()) === LETTER,
     (await page.getByTestId('backup-result').innerText()).slice(0, 120),
   );
 
