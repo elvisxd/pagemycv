@@ -29,7 +29,6 @@ const EXT = path.join(__dirname, '../../.output/chrome-mv3');
  * seen, from a stray manual run alongside a stability loop.
  */
 const PROFILE = path.join(__dirname, `../../.e2e-profile-${process.pid}`);
-const PASSPHRASE = 'correct horse battery staple';
 
 // The real CV when this checkout sits next to Byte, otherwise a fixture with
 // the same shape. The gate must not depend on one person's filesystem.
@@ -205,41 +204,45 @@ async function main() {
   // already-open fast path and the check passed even without the guard.
   const pages = await Promise.all([ctx.newPage(), ctx.newPage(), ctx.newPage(), ctx.newPage()]);
   await Promise.all(pages.map((p) => p.goto(`chrome-extension://${id}/sidepanel.html`)));
+  // Four at once, because creating the vault is now something the extension
+  // does to itself on first open rather than something a person asks for.
+  // Two concurrent opens both seeing an absent vault would both create one,
+  // and the winner would own a key the loser's rows are not encrypted under.
   const raced = await Promise.all(
     pages.map((p) =>
       p
-        .getByRole('button', { name: 'Create the vault' })
+        .getByRole('button', { name: /Import your CV|Re-import CV/ })
         .waitFor({ timeout: 60000 })
-        .then(() => 'create')
+        .then(() => 'open')
         .catch(async () => (await p.locator('body').innerText()).slice(0, 60)),
     ),
   );
   check(
-    'four concurrent cold opens all reach the create screen',
-    raced.every((r) => r === 'create'),
+    'four concurrent cold opens all land on a working vault, with nothing asked',
+    raced.every((r) => r === 'open'),
     raced.join(' | '),
   );
   let page = pages[0];
   await Promise.all(pages.slice(1).map((p) => p.close()));
 
-  // The passphrase minimum is the worker's rule, not the panel's. Enter
-  // bypasses the disabled button, which is how this reaches the worker at all.
-  await page.getByLabel('Passphrase').fill('short');
-  await page.keyboard.press('Enter');
-  const shortMsg = await page
-    .getByRole('alert')
-    .innerText({ timeout: 30000 })
-    .catch(() => '(no message appeared)');
-  check('a short passphrase is refused by the worker', /at least 12/.test(shortMsg), shortMsg);
-
-  await page.getByLabel('Passphrase').fill(PASSPHRASE);
-  await page.getByRole('button', { name: 'Create the vault' }).click();
-  await page
-    .getByRole('button', { name: /Import your CV|Re-import CV/ })
-    .waitFor({ timeout: 60000 });
-  // Was a hardcoded `true`, which could never fail and was still reported as
-  // evidence. Assert something the screen actually shows.
-  check('vault created', /Lock/.test(await page.locator('body').innerText()));
+  // The point of the whole change, asserted rather than assumed: a first open
+  // puts NOTHING in the way. Not a passphrase box, not a create button.
+  //
+  // The "reached a working vault" half is load-bearing. Without it this read
+  // as a pass against the error screen, which also has no passphrase box —
+  // which is exactly how it passed while every open was failing.
+  const firstOpen = await page.locator('body').innerText();
+  check(
+    'a first open asks for nothing at all, and reaches a working vault',
+    !/passphrase/i.test(firstOpen) &&
+      (await page.getByLabel('Passphrase').count()) === 0 &&
+      /Import your CV/.test(firstOpen),
+    firstOpen.slice(0, 80),
+  );
+  check(
+    'and there is no lock to press, because there is nothing to lock it with',
+    (await page.getByRole('button', { name: 'Lock' }).count()) === 0,
+  );
 
   await page.getByRole('button', { name: /Import your CV|Re-import CV/ }).click();
   await page.getByTestId('cv-markdown').fill(CV);
@@ -333,24 +336,68 @@ async function main() {
   ({ ctx, id } = await launch());
   page = await ctx.newPage();
   await page.goto(`chrome-extension://${id}/sidepanel.html`);
-  await page.getByLabel('Passphrase').waitFor({ timeout: 60000 });
-  const lockedBody = await page.locator('body').innerText();
-  check('vault is locked after restart', /locked/i.test(lockedBody), lockedBody.slice(0, 80));
-
-  await page.getByLabel('Passphrase').fill('the wrong passphrase');
-  await page.getByRole('button', { name: 'Unlock' }).click();
-  await page.getByRole('alert').waitFor({ timeout: 60000 });
-  check(
-    'a wrong passphrase is refused',
-    /wrong passphrase/i.test(await page.getByRole('alert').innerText()),
-  );
-
-  await page.getByLabel('Passphrase').fill(PASSPHRASE);
-  await page.getByRole('button', { name: 'Unlock' }).click();
-  await page.getByRole('button', { name: 'Lock' }).waitFor({ timeout: 60000 });
+  await page.getByRole('button', { name: /Re-import CV/ }).waitFor({ timeout: 60000 });
   const bodyRun2 = await page.locator('body').innerText();
+  // The restart is the case that mattered: a key held only in memory dies
+  // with the browser, which is exactly what used to put the passphrase box
+  // back on screen every morning.
+  check(
+    'the vault opens itself after a full browser restart, with nothing asked',
+    !/passphrase/i.test(bodyRun2) && (await page.getByLabel('Passphrase').count()) === 0,
+    bodyRun2.slice(0, 80),
+  );
   check('the profile survived the restart', /experience ·/i.test(bodyRun2));
   check('the same roles are there', bodyRun2.includes('Nesty'), bodyRun2.slice(0, 120));
+
+  const savedKey = await page.evaluate(
+    async () => (await chrome.storage.local.get('vault.key.v1'))['vault.key.v1'],
+  );
+  check(
+    'the key is on disk as 32 bytes, which is what makes the open possible',
+    Array.isArray(savedKey) && savedKey.length === 32,
+    Array.isArray(savedKey) ? `${savedKey.length} bytes` : String(savedKey),
+  );
+
+  // ── The key gone missing from a vault that has no passphrase ────────
+  //
+  // Not hypothetical: it is what a cleared "browsing data" sweep or a copied
+  // profile looks like. The only wrong answer is a SECOND vault written over
+  // a CV that is still sitting on disk.
+  //
+  // It needs a full restart, not just a reload. Deleting the stored key does
+  // not close a vault the worker already has open, and it should not — the
+  // first version of this check reloaded the page, saw everything still
+  // working, and was asserting nothing.
+  await page.evaluate(async () => {
+    await chrome.storage.local.remove('vault.key.v1');
+  });
+  await ctx.close();
+
+  ({ ctx, id } = await launch());
+  page = await ctx.newPage();
+  await page.goto(`chrome-extension://${id}/sidepanel.html`);
+  await page.getByRole('alert').waitFor({ timeout: 60000 });
+  const stranded = await page.locator('body').innerText();
+  check(
+    'a vault whose key has gone says so instead of creating a second one',
+    /key is not in this browser profile/i.test(stranded) && !/Import your CV/.test(stranded),
+    stranded.slice(0, 140),
+  );
+
+  // Put it back, so the rest of the run has the vault it imported into.
+  await page.evaluate(async (material) => {
+    await chrome.storage.local.set({ 'vault.key.v1': material });
+  }, savedKey);
+  await ctx.close();
+
+  ({ ctx, id } = await launch());
+  page = await ctx.newPage();
+  await page.goto(`chrome-extension://${id}/sidepanel.html`);
+  await page.getByRole('button', { name: /Re-import CV/ }).waitFor({ timeout: 60000 });
+  check(
+    'and opens again once the key is back, with the same CV behind it',
+    (await page.locator('body').innerText()).includes('Nesty'),
+  );
 
   // ── Phase 2: fill Lever and Greenhouse ──────────────────────────────
   //

@@ -16,6 +16,13 @@ careers page, which is where most applications actually live. It attaches your
 résumé, highlights everything it wrote, and refuses to touch a sensitive field
 or a honeypot. It still has no network code at all.
 
+It opens with nothing asked. There is no passphrase and no sign-in: the vault
+key is generated once and kept in extension storage. The database stays
+encrypted, so a copy of the file on its own is useless — but the key is in the
+same browser profile, so a copy of the *profile* is not. That trade is
+deliberate and written up in
+[`03-security.md`](docs/03-security.md#what-dropping-the-passphrase-cost).
+
 | | |
 |---|---|
 | Sensitive fields filled automatically | **zero**, by construction |

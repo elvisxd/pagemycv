@@ -1,13 +1,21 @@
 /** Shared row and view types. No SQL here; the tables live in migrations/. */
 
-export type VaultStatus = 'absent' | 'locked' | 'unlocked' | 'unavailable';
+/**
+ * 'absent'          nothing on disk yet; the next open creates it
+ * 'opening'         a vault with a stored key, which this worker has not been
+ *                   given yet. Transient, and never a screen: the offscreen
+ *                   document hands the key over before any command returns.
+ * 'needs_passphrase' a vault created before the passphrase was dropped. The
+ *                   one state that still puts a prompt on screen, once.
+ * 'unlocked'        open and readable
+ * 'unavailable'     the database could not be opened at all
+ */
+export type VaultStatus = 'absent' | 'opening' | 'needs_passphrase' | 'unlocked' | 'unavailable';
 
 export interface VaultState {
   status: VaultStatus;
   /** Set only when status is 'unavailable'. */
   problem?: string;
-  /** Epoch ms when an unlocked vault will auto-lock, if unlocked. */
-  locksAt?: number;
 }
 
 export interface WorkHistoryRow {

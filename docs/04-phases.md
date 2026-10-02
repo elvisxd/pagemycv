@@ -101,6 +101,12 @@ a failure.
 Plus 81 unit tests, including the one the AAD design exists for: a ciphertext
 moved to another row or column fails to decrypt.
 
+> **Six of those rows no longer describe the build.** The passphrase was
+> removed on request after Phase 4 — see "The passphrase comes out" below. The
+> table is left as it was because it records what Phase 1 shipped and passed,
+> not what is true today; rewriting it would erase the fact that the property
+> was once there and was given up deliberately.
+
 Two corrections to the plan, found by building it:
 
 - **The Argon2 package name in the research was wrong.** `@openpgp/argon2id` is
@@ -369,6 +375,42 @@ hosts. Do not start it until Phase 4's gate has passed.
 
 **Gate.** A fresh Chrome profile installs the unpacked build and completes a
 Lever application.
+
+---
+
+## The passphrase comes out
+
+Not a phase. Asked for directly — *"que abra normal sin login ni nada"* — after
+a Google sign-in was costed and set aside for later.
+
+What it changes is written up in `03-security.md` under "What dropping the
+passphrase cost", including the part that is a real loss: a copied browser
+profile now reads the CV. The short version is that with no passphrase there
+is no secret the machine does not also have, so no storage choice recovers
+that property. What survives is the split between the two stores, which is
+what makes a copy of the *database file alone* useless.
+
+Three things were found building it, all by measuring rather than reasoning:
+
+- **`chrome` is undefined inside a dedicated worker** (`spikes/phase-5`). The
+  worker is where the key is used and would have been the natural owner. It
+  cannot be, so the design changed before it was written.
+- **An offscreen document has `chrome.runtime` and nothing else.** This one
+  was not measured first, it was assumed — the key store went there, and every
+  open failed. The gate caught it. The key store now lives in the service
+  worker, which is the only context that can hold it.
+- **`ensureOffscreen` waited for the document to exist, not to answer.** A
+  latent race that predates this change: `createDocument` resolves before the
+  document's scripts have run, and anything sent in that window comes back
+  "Receiving end does not exist". One relayed message could absorb it; a
+  sequence could not, so opening the vault made it visible. It now waits for
+  a ping, which is the fix the original comment had already described without
+  applying.
+
+Existing vaults are converted rather than abandoned: the passphrase is asked
+for once, the key it derives is stored, and nothing is re-encrypted, because
+it is the same key. The ordering that makes that safe is in
+`src/vault/convert.ts` and tested in `tests/unit/convert.test.ts`.
 
 ---
 

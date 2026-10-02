@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "spike-worker-storage",
+  "version": "1.0",
+  "permissions": [
+    "offscreen",
+    "unlimitedStorage",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
