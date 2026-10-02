@@ -705,7 +705,10 @@ async function main() {
       frame.evaluate(() => {
         const out = {};
         for (const el of document.querySelectorAll('input, select, textarea')) {
-          const key = el.getAttribute('name') || el.id;
+          // data-gate is the harness's own handle on a control that has
+          // neither, as Ashby's Location combobox has neither. The extension
+          // never reads it.
+          const key = el.getAttribute('name') || el.id || el.getAttribute('data-gate');
           if (!key) continue;
           out[key] = el.type === 'file' ? (el.files?.[0]?.name ?? '') : el.value;
         }
@@ -1004,20 +1007,53 @@ async function main() {
   const ashby = await fillBoard('ashby');
   const ab = ashby.state.values;
 
+  // The ids below are the real page's: the legal name and the phone are
+  // per-job questions with generated names.
+  const LEGAL = '2b460c11-7aac-46c1-8955-5eb5ea90d8e7';
+  const PHONE = 'dfe370ab-96c3-4bf0-bdec-d7a7c039ebd4';
+
   check('ashby: it never submitted', ashby.state.submits === 0, `${ashby.state.submits} submit(s)`);
   check(
-    'ashby: the identity fields are filled',
-    ab._systemfield_name === EXPECT.full && ab._systemfield_email === EXPECT.email,
-    JSON.stringify({ name: ab._systemfield_name, email: ab._systemfield_email }),
+    'ashby: the identity fields are filled, the legal name through a generated field name',
+    ab[LEGAL] === EXPECT.full &&
+      ab._systemfield_email === EXPECT.email &&
+      ab[PHONE] === EXPECT.phone,
+    JSON.stringify({ legal: ab[LEGAL], email: ab._systemfield_email, phone: ab[PHONE] }),
   );
-  // The bug Elvis's form exposed: "Preferred Full Name" got the legal name,
-  // because Chromium has no preferred-name type and its FULL_NAME pattern
-  // matches `full.?name`.
+  // The bug Elvis's form exposed, twice. First: "Preferred Full Name" got the
+  // legal name, because Chromium has no preferred-name type and its FULL_NAME
+  // pattern matches `full.?name`. Then the real page showed that Ashby's
+  // `_systemfield_name` IS that box, so the ATS map said full_name about it
+  // at 0.9 and the first fix never ran.
   check(
-    'ashby: the PREFERRED name box gets YOUR preferred name, not the legal one',
-    ab._systemfield_preferred_name === EXPECT.first &&
-      ab._systemfield_preferred_name !== EXPECT.full,
-    `preferred = ${JSON.stringify(ab._systemfield_preferred_name)}`,
+    'ashby: the PREFERRED name box gets YOUR preferred name, not the legal one — even though it is `_systemfield_name`',
+    ab._systemfield_name === EXPECT.first && ab._systemfield_name !== EXPECT.full,
+    `preferred = ${JSON.stringify(ab._systemfield_name)}`,
+  );
+  // The résumé input is parked at 1x1 under clip and clip-path, behind a
+  // dropzone. Measured alone it was refused as "too small to be a real
+  // field" and the résumé never reached the form.
+  check(
+    'ashby: the résumé is attached through a file input parked at 1x1 behind its dropzone',
+    ab._systemfield_resume === RESUME_NAME && ashby.state.fileSize === RESUME_BYTES.length,
+    `file = ${JSON.stringify(ab._systemfield_resume)}, ${ashby.state.fileSize} bytes`,
+  );
+  // The Location input has no id, so its label's `for` points nowhere, and it
+  // sits alone in a wrapper with no label inside. It was reported by its
+  // placeholder, "Start typing...", and nothing recognised it.
+  check(
+    'ashby: the Location combobox is found through its field entry and gets "City, Region"',
+    ab.location === 'Orlando, Florida',
+    `location = ${JSON.stringify(ab.location)}`,
+  );
+  // The yes/no widget hides its checkbox. Not filled in this phase, but the
+  // review must name it by its question, not by its generated name.
+  check(
+    'ashby: a hidden yes/no checkbox is listed under its question, not its generated name',
+    /comfortable with the travel requirements/i.test(ashby.review ?? '') &&
+      !/f35ff966-1137-47d7-8a1e-b38949b75019/.test(ashby.review ?? ''),
+    (ashby.review ?? '').split('\n').find((l) => /f35ff966|travel requirements/i.test(l)) ??
+      '(neither the question nor its name appears in the review)',
   );
   // The worse one. The label contains "current employer", so the box asking
   // when you can start was filled with the name of the company you work for.
@@ -1033,8 +1069,8 @@ async function main() {
   );
   check(
     'ashby: a stored answer travelled encrypted from the vault into the form',
-    ab.q_travel === 'Yes, up to 25%' && ab.q_clearance === 'None of the above',
-    JSON.stringify({ travel: ab.q_travel, clearance: ab.q_clearance }),
+    ab.q_clearance === 'None of the above',
+    JSON.stringify({ clearance: ab.q_clearance }),
   );
   // Invariant 2, on the questions a real form actually asks.
   check(
@@ -1439,8 +1475,41 @@ async function main() {
   await page.goto(`chrome-extension://${id}/sidepanel.html`);
   await page.getByRole('button', { name: /Import your CV/ }).waitFor({ timeout: 60000 });
   check(
-    'restore: the fresh profile really starts empty',
-    !(await page.locator('body').innerText()).includes(EXPECT.employer),
+    'restore: the fresh profile really starts empty, and the fill section says so',
+    !(await page.locator('body').innerText()).includes(EXPECT.employer) &&
+      (await page.getByTestId('no-cv-note').count()) === 1,
+  );
+
+  // What Elvis did: stored the résumé under "Résumé file" and never imported
+  // a CV, because both looked like the same thing. A résumé stored into an
+  // empty vault is now read as the CV and shown for review; Cancel keeps the
+  // file and stores nothing else.
+  await page.setInputFiles('#resume-file', {
+    name: 'ada-cv.pdf',
+    mimeType: 'application/pdf',
+    buffer: onePdf,
+  });
+  await page.getByTestId('cv-review').waitFor({ timeout: 60000 });
+  check(
+    'empty vault: a résumé file stored into it is read as the CV and offered for review',
+    (await page.getByTestId('cv-legalFirst').inputValue()) === EXPECT.first &&
+      (await page.getByTestId('cv-email').inputValue()) === EXPECT.email,
+    JSON.stringify({
+      first: await page.getByTestId('cv-legalFirst').inputValue(),
+      email: await page.getByTestId('cv-email').inputValue(),
+    }),
+  );
+  // Cancel on the review returns to the picker; Cancel there closes it.
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByTestId('cv-file').waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: /Import your CV/ }).waitFor({ timeout: 30000 });
+  const afterCancel = await page.locator('body').innerText();
+  check(
+    'empty vault: Cancel keeps the file and stores nothing from it',
+    afterCancel.includes('ada-cv.pdf') &&
+      !afterCancel.includes(EXPECT.employer) &&
+      (await page.getByTestId('no-cv-note').count()) === 1,
   );
 
   await page.setInputFiles('[data-testid="backup-file"]', BACKUP_FILE);

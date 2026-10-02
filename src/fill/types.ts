@@ -146,6 +146,19 @@ export interface FieldDescriptor {
   options: readonly { value: string; text: string }[];
   /** Layout facts, already computed. See visibility.ts for what they mean. */
   metrics: VisibilityMetrics;
+  /**
+   * For a file input only: the layout facts of the thing a person clicks to
+   * open the picker, when the input itself is not that thing.
+   *
+   * Every board styles its own upload control and parks the real
+   * `<input type="file">` at 1x1 under a clip, because a native file input
+   * cannot be styled. Measured on its own, the input fails the visibility
+   * gate and the résumé is never attached; measured by its label or its
+   * dropzone, it is as visible as what the person sees. Null for every other
+   * control, and null for a file input with no label and no dropzone, which
+   * then stands or falls on its own box like anything else.
+   */
+  trigger: VisibilityMetrics | null;
 }
 
 /**

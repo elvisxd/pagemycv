@@ -99,6 +99,20 @@ React, with CSS-module hashed class names. Assume no stable hooks.
   application-form only
 - Class names are unstable. Match on **label text**, not on classes.
 
+What a real application page looks like (jobs.ashbyhq.com/npx/…, read from
+the DOM, not from a screenshot):
+
+| Field | Markup | What it meant for the code |
+|---|---|---|
+| Preferred Full Name | `<input name="_systemfield_name" id="_systemfield_name">`, label via `for` | **The system name field is the preferred-name box.** The ATS map said `full_name` about it at 0.9, so the legal name went into it. The preferred-name label rule now overrides the map as well as Chromium (`LABEL_OVERRIDES` in detect.ts). |
+| Legal Full Name, Pronouns, Phone, the screening questions | per-job questions: `name` and `id` are a GUID | Nothing to map; the label carries them. Pronouns are the sensitive class. |
+| Email | `_systemfield_email`, `type="email"` | Mapped. |
+| Location | `<input role="combobox" aria-autocomplete="list" placeholder="Start typing...">` with **no id and no name**; the label's `for="_systemfield_location"` points nowhere | The label lookup now walks out through wrappers that hold only this control to the field entry that names it. Filled with "City, Region" from the vault; the page offers its own suggestions to pick from. |
+| Resume | `<input type="file" id="_systemfield_resume" tabindex="-1" style="clip: rect(0,0,0,0); clip-path: inset(50%); width: 1px; height: 1px; …">` behind a dropzone with an "Upload File" button | Parked at 1x1; refused by the visibility gate until the file-input release described under invariant 3 in `03-security.md`. |
+| Yes / No questions | two `<button aria-pressed data-option="yes|no">` and a `<input type="checkbox" tabindex="-1" name="<guid>">` with `display: none` | **Not filled.** The checkbox is hidden and checkboxes are not written in this phase; the buttons are not controls. The review lists the question by its label. A future pass could click the button for `travel_ok` and the like; the sensitive ones (eligibility, sponsorship) would stay refused either way. |
+| Checkbox groups | `<fieldset>` of `<input type="checkbox" name="<option text>">`, each with its own label | Not filled: checkboxes are not written in this phase. |
+| The "Autofill from resume" box at the top | a second parked file input, unlabelled, with its own dropzone | Visible by its dropzone, recognised by nothing, left alone. Attaching there would hand the résumé to Ashby's parser rather than to the application. |
+
 ## Workday
 
 Its own phase. Everything below is why.

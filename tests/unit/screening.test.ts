@@ -51,6 +51,7 @@ function field(label: string, over: Partial<FieldDescriptor> = {}): FieldDescrip
       documentWidth: 1200,
       documentHeight: 3000,
     },
+    trigger: null,
     ...over,
   };
 }

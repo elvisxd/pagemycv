@@ -1,6 +1,20 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Senior Full Stack Developer — Apply</title></head>
+<head>
+<meta charset="utf-8"><title>Senior Full Stack Developer — Apply</title>
+<style>
+  /* Ashby's own inline style on the real file input, verbatim: the native
+     control cannot be styled, so it is parked at one pixel under two clips
+     and a button is drawn in its place. Measured alone, this fails the
+     visibility gate. */
+  .parked { border: 0; clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px;
+            margin: 0 -1px -1px 0; overflow: hidden; padding: 0; position: absolute;
+            width: 1px; white-space: nowrap; }
+  .dropzone { border: 1px dashed #999; padding: 16px; }
+  /* The yes/no widget: two buttons and a checkbox nobody sees. */
+  .yesno input { display: none; }
+</style>
+</head>
 <body>
   <h1>Senior Full Stack Developer</h1>
   <!--
@@ -10,29 +24,59 @@
   -->
   <p>Compensation: CA$140K – CA$190K • Exact compensation may vary</p>
 
+  <!--
+    Copied from a real application (jobs.ashbyhq.com/npx/…/application), with
+    the hashed class names and the generated ids shortened. The shape is the
+    point: the SYSTEM name field is the one labelled "Preferred Full Name",
+    the legal name is a per-job question with a generated name, the Location
+    input has no id for its label to point at, and the résumé input is parked
+    at 1x1 behind a dropzone.
+  -->
   <form id="application">
     <h2>About you</h2>
 
-    <label for="pref">Preferred Full Name</label>
-    <input id="pref" name="_systemfield_preferred_name">
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="_systemfield_name">Preferred Full Name</label>
+      <div><input placeholder="Type here..." name="_systemfield_name" id="_systemfield_name" type="text"></div>
+    </div>
 
-    <label for="legal">Legal Full Name</label>
-    <input id="legal" name="_systemfield_name">
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="2b460c11-7aac-46c1-8955-5eb5ea90d8e7">Legal Full Name</label>
+      <div><input placeholder="Type here..." name="2b460c11-7aac-46c1-8955-5eb5ea90d8e7" id="2b460c11-7aac-46c1-8955-5eb5ea90d8e7" type="text"></div>
+    </div>
 
-    <label for="pronouns">Pronouns</label>
-    <input id="pronouns" name="pronouns">
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="537e9fb1-7b57-4126-b066-23a261c0195f">Pronouns</label>
+      <div><input placeholder="Type here..." name="537e9fb1-7b57-4126-b066-23a261c0195f" id="537e9fb1-7b57-4126-b066-23a261c0195f" type="text"></div>
+    </div>
 
-    <label for="email">Email</label>
-    <input id="email" name="_systemfield_email" type="email">
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="_systemfield_email">Email</label>
+      <div><input placeholder="hello@example.com..." name="_systemfield_email" id="_systemfield_email" type="email"></div>
+    </div>
 
-    <label for="phone">Phone number</label>
-    <input id="phone" name="_systemfield_phone" type="tel">
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="dfe370ab-96c3-4bf0-bdec-d7a7c039ebd4">Phone number</label>
+      <input placeholder="1-415-555-1234..." name="dfe370ab-96c3-4bf0-bdec-d7a7c039ebd4" id="dfe370ab-96c3-4bf0-bdec-d7a7c039ebd4" type="tel">
+    </div>
 
-    <label for="loc">Location</label>
-    <input id="loc" name="_systemfield_location">
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="_systemfield_location">Location</label>
+      <div class="_inputContainer_d7ago_28">
+        <!-- No id and no name, exactly as Ashby renders it. data-gate is for
+             the harness to read the value back; the extension never looks at it. -->
+        <input class="_input_d7ago_28" placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" data-gate="location">
+        <button type="button" class="_toggleButton_d7ago_32">▾</button>
+      </div>
+    </div>
 
-    <label for="resume">Resume</label>
-    <input id="resume" name="_systemfield_resume" type="file">
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="_systemfield_resume">Resume</label>
+      <div role="presentation" class="dropzone">
+        <input class="parked" accept="application/pdf,.pdf,.doc,.docx" type="file" tabindex="-1" id="_systemfield_resume" data-gate="_systemfield_resume">
+        <div><button type="button">Upload File</button><p>or drag and drop here</p></div>
+      </div>
+    </div>
 
     <label for="elig">Are you legally eligible to work in Canada?</label>
     <input id="elig" name="q_eligible">
@@ -43,8 +87,19 @@
     <label for="clear">Which utility do you have an active security clearance with?</label>
     <input id="clear" name="q_clearance">
 
-    <label for="travel">Are you comfortable with the travel requirements listed in the job posting?</label>
-    <input id="travel" name="q_travel">
+    <!-- The real yes/no widget: a checkbox with display:none behind two
+         aria-pressed buttons. The checkbox has no id, so the label's `for`
+         points nowhere and the question is found by walking out of the
+         widget. Not filled in this phase; what is tested is that the review
+         names it by its question rather than by its generated name. -->
+    <div class="_fieldEntry_1e3gg_28">
+      <label class="_label_1e3gg_42" for="f35ff966-1137-47d7-8a1e-b38949b75019">Are you comfortable with the travel requirements listed in the job posting?</label>
+      <div class="yesno">
+        <button type="button" aria-pressed="false" data-option="yes">Yes</button>
+        <button type="button" aria-pressed="false" data-option="no">No</button>
+        <input type="checkbox" tabindex="-1" name="f35ff966-1137-47d7-8a1e-b38949b75019">
+      </div>
+    </div>
 
     <label for="salary">What are you looking for as a base salary?</label>
     <input id="salary" name="q_salary">

@@ -176,6 +176,39 @@ forced by evidence rather than by taste.
       not a filled-in guess. A field left empty is corrected in a second; a
       wrong one typed into an application is not.
 
+## Decided after the first real Ashby application
+
+Elvis stored his résumé, pressed Fill on a real Ashby form, and one field
+filled. Everything below came out of the panel's own review list and the
+page's DOM, which is what the review list is for.
+
+- [x] **A résumé stored into an empty vault is read as the CV.** Two things
+      on the panel both looked like "give us your CV" and only one of them
+      read it. Picking a résumé file when no CV is imported now opens the
+      same review form; Save stores what it says, Cancel keeps the file. The
+      fill section also says, in one sentence, that no CV has been imported,
+      and the planner says it once per field instead of "nothing stored for
+      X" twelve times.
+- [x] **A file input is as visible as its trigger.** The one release the
+      visibility gate has ever been given, for one control type, with the
+      evidence spelled out in `03-security.md`. Every board parks its file
+      input at 1x1; refusing them all meant never attaching a résumé anywhere
+      but on a fixture.
+- [x] **The label rule for "preferred name" beats the ATS map too.** The
+      map is a fact about a field name; the label is a fact about what the
+      box is for, and on Ashby the two disagree on the one field where
+      getting it wrong types the legal name into the box that asked for the
+      other one. Kept as a one-entry list, not a general rule.
+- [x] **Labels are found by walking out, not only by looking in.** The
+      nearest group often holds the control and nothing else. The one-control
+      rule — a group that holds only this control can only be describing it —
+      holds at every step, so the walk adds no way to borrow a neighbour's
+      label.
+- [ ] **Yes/No button pairs are not filled.** Ashby's are two `aria-pressed`
+      buttons over a hidden checkbox. Clicking a button is a new kind of
+      write, like the Workday listboxes were; it is worth doing for the
+      screening answers and nothing else, and it is not done yet.
+
 ## Still open
 
 The one thing that could have changed the shape of the project is settled.

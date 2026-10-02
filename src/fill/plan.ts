@@ -108,6 +108,7 @@ export function buildPlan(
 ): FillPlan {
   const byRef = new Map(classifications.map((c) => [c.ref, c]));
   const planned: PlannedField[] = [];
+  const noCv = Object.values(values).every((v) => !v);
 
   for (const field of fields) {
     const label = displayLabel(field);
@@ -120,7 +121,19 @@ export function buildPlan(
     // Order matters and is the order of the invariants. Visibility is computed
     // before the honeypot check because an ambiguous name like `website` is
     // released from the denylist only by being visible AND labelled.
-    const hidden = visibilityProblem(field.metrics);
+    let hidden = visibilityProblem(field.metrics);
+    // A file input is as visible as the thing that opens it. Every board
+    // parks the real `<input type="file">` at 1x1 under a clip and draws its
+    // own upload button, because a native file input cannot be styled;
+    // measured alone, the input fails the gate and the résumé is never
+    // attached — which is what happened on Ashby. The descriptor records the
+    // trigger only for a file input, and only when that trigger is a label
+    // or a dropzone with something clickable in it, so this releases nothing
+    // else: a 1x1 text box next to a visible label stays refused. See
+    // docs/03-security.md, invariant 3.
+    if (hidden && field.trigger && field.type === 'file' && !visibilityProblem(field.trigger)) {
+      hidden = null;
+    }
     const trap = honeypotReason(field, hidden === null);
     if (trap) {
       skip('honeypot', trap);
@@ -205,7 +218,17 @@ export function buildPlan(
         skip('unanswered', `you have not set your answer for ${c.kind.replace(/_/g, ' ')} yet`);
         continue;
       }
-      skip('no-value', `nothing stored for ${c.kind.replace(/_/g, ' ')}`);
+      // An empty vault is one reason, not twelve. "Nothing stored for full
+      // name", "for email", "for phone" down a whole form read as twelve
+      // separate faults when the one fact is that no CV has been imported;
+      // Elvis stored his résumé as a file, saw that list, and could not tell
+      // what the extension wanted from him.
+      skip(
+        'no-value',
+        noCv
+          ? `no CV has been imported yet, so there is no ${c.kind.replace(/_/g, ' ')} to fill`
+          : `nothing stored for ${c.kind.replace(/_/g, ' ')}`,
+      );
       continue;
     }
     if (field.hasValue) {

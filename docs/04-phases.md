@@ -565,7 +565,7 @@ through the panel in a real browser; see the right fields proposed; change
 one, save, see the change stored; cancel the others and see the vault
 untouched; see a `.doc` refused with the message. Then store a cover letter
 as text and as a file and watch the generic form take both, having asserted
-the same boxes stayed empty while none was stored. **Met:** gate 121 checks.
+the same boxes stayed empty while none was stored. **Met:** gate 121 checks, 126 after the first real Ashby application (see DECISIONS.md).
 Removing the gutter rule fails exactly the two-column check, with the columns
 interleaved in its detail.
 
