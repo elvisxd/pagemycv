@@ -82,7 +82,7 @@ function decide(label: string, answers: ScreeningAnswers = {}, values: FillValue
   const target = field(label, { ref: 'target' });
   const form = [target, ...COMPANIONS.map((l, i) => field(l, { ref: `c${i}` }))];
   const cls: Classification[] = classify(form, ASHBY);
-  const plan = buildPlan(form, cls, values, ASHBY, null, answers);
+  const plan = buildPlan(form, cls, values, ASHBY, {}, answers);
   const row = plan.fields.find((f) => f.ref === 'target');
   const c = cls.find((x) => x.ref === 'target');
   if (!row) throw new Error('no plan row');

@@ -13,9 +13,16 @@ import {
   BackupError,
   parseBackup,
 } from '../backup/format';
-import type { FieldKind, FillValues, ResumeFile, ScreeningAnswers } from '../fill/types';
-import { SCREENING_KINDS } from '../fill/types';
-import { parseCvMarkdown } from '../import/cv-markdown';
+import type {
+  DocumentKind,
+  FieldKind,
+  FillValues,
+  ScreeningAnswers,
+  StoredFile,
+  StoredFiles,
+} from '../fill/types';
+import { DOCUMENT_KINDS, SCREENING_KINDS } from '../fill/types';
+import type { ParsedCv } from '../import/cv-markdown';
 import { SENSITIVE_FIELDS } from '../sensitive/registry';
 import { fromBase64, toBase64 } from '../util/base64';
 import { KEY_DOES_NOT_OPEN } from '../vault/convert';
@@ -29,7 +36,7 @@ import {
 } from '../vault/crypto';
 import INITIAL_SQL from './migrations/001_initial.sql?raw';
 import SCREENING_SQL from './migrations/002_screening_answers.sql?raw';
-import type { ProfileView, ResumeMeta, VaultState } from './schema';
+import type { DocumentsMeta, ProfileView, ResumeMeta, VaultState } from './schema';
 
 const DB_PATH = '/pagemycv.sqlite3';
 const POOL_NAME = 'pagemycv';
@@ -327,11 +334,83 @@ async function profileView(): Promise<ProfileView> {
   };
 }
 
-async function importCv(
-  markdown: string,
-): Promise<{ imported: true; counts: Record<string, number> }> {
+/**
+ * The panel is not the authority on shape any more than it was on emptiness:
+ * what arrives over a message is checked here before a row is written from
+ * it. Strings are strings, lists are lists, nothing else is assumed.
+ */
+function checkParsedCv(raw: unknown): ParsedCv {
+  const bad = (what: string) => new Error(`the CV to import is malformed: ${what}`);
+  if (typeof raw !== 'object' || raw === null) throw bad('not an object');
+  const o = raw as Record<string, unknown>;
+  const text = (key: string): string => {
+    const v = o[key];
+    if (typeof v !== 'string') throw bad(`${key} should be text`);
+    return v;
+  };
+  const optText = (holder: Record<string, unknown>, key: string, where: string): string | null => {
+    const v = holder[key];
+    if (v === null || v === undefined) return null;
+    if (typeof v !== 'string') throw bad(`${where}.${key} should be text or empty`);
+    return v;
+  };
+  const list = (key: string): Record<string, unknown>[] => {
+    const v = o[key];
+    if (!Array.isArray(v)) throw bad(`${key} should be a list`);
+    return v.map((item, i) => {
+      if (typeof item !== 'object' || item === null) throw bad(`${key}[${i}] is not an entry`);
+      return item as Record<string, unknown>;
+    });
+  };
+  return {
+    legalFirst: text('legalFirst'),
+    legalLast: text('legalLast'),
+    headline: optText(o, 'headline', 'cv'),
+    summary: optText(o, 'summary', 'cv'),
+    city: optText(o, 'city', 'cv'),
+    region: optText(o, 'region', 'cv'),
+    email: optText(o, 'email', 'cv'),
+    phone: optText(o, 'phone', 'cv'),
+    work: list('work').map((w, i) => ({
+      title:
+        typeof w.title === 'string'
+          ? w.title
+          : (() => {
+              throw bad(`work[${i}].title should be text`);
+            })(),
+      employer: typeof w.employer === 'string' ? w.employer : '',
+      location: optText(w, 'location', `work[${i}]`),
+      isRemote: w.isRemote === true,
+      startedOn: typeof w.startedOn === 'string' ? w.startedOn : '',
+      endedOn: optText(w, 'endedOn', `work[${i}]`),
+      description: optText(w, 'description', `work[${i}]`),
+    })),
+    education: list('education').map((e, i) => ({
+      degree: optText(e, 'degree', `education[${i}]`),
+      institution:
+        typeof e.institution === 'string'
+          ? e.institution
+          : (() => {
+              throw bad(`education[${i}].institution should be text`);
+            })(),
+      startedOn: optText(e, 'startedOn', `education[${i}]`),
+      endedOn: optText(e, 'endedOn', `education[${i}]`),
+    })),
+    links: list('links').map((l, i) => ({
+      kind: typeof l.kind === 'string' ? l.kind : 'other',
+      url:
+        typeof l.url === 'string'
+          ? l.url
+          : (() => {
+              throw bad(`links[${i}].url should be text`);
+            })(),
+    })),
+  };
+}
+
+async function importCv(raw: unknown): Promise<{ imported: true; counts: Record<string, number> }> {
   const vaultKey = requireKey();
-  const cv = parseCvMarkdown(markdown);
+  const cv = checkParsedCv(raw);
 
   // This operation deletes every role, degree and link before inserting. If the
   // text did not parse into anything, that is a wipe with nothing to show for
@@ -428,9 +507,13 @@ async function importCv(
   };
 }
 
-/** The single row id the default resume lives under. */
-const RESUME_ID = 'resume-default';
-/** A resume larger than this is a mistake, not a resume. */
+/**
+ * The single row id each stored file lives under. The résumé's is the id it
+ * has always had, so a vault written before the cover letter existed still
+ * finds it.
+ */
+const documentId = (kind: DocumentKind): string => `${kind}-default`;
+/** A file larger than this is a mistake, not a résumé or a cover letter. */
 const MAX_RESUME_BYTES = 8 * 1024 * 1024;
 
 const RESUME_TYPES: Readonly<Record<string, string>> = {
@@ -460,7 +543,17 @@ function resumeProblem(mimeType: string, base64: string): string | null {
   return null;
 }
 
-async function setResume(
+function checkDocumentKind(kind: string): DocumentKind {
+  // A row under any other kind could never be read back by the fill path,
+  // so storing it would be a silent no-op that looks like it worked.
+  if (!(DOCUMENT_KINDS as readonly string[]).includes(kind)) {
+    throw new Error(`${kind} is not a document this stores`);
+  }
+  return kind as DocumentKind;
+}
+
+async function setDocument(
+  kind: DocumentKind,
   filename: string,
   mimeType: string,
   base64: string,
@@ -469,40 +562,66 @@ async function setResume(
   const problem = resumeProblem(mimeType, base64);
   if (problem) throw new Error(problem);
   const bytes = Math.floor((base64.length * 3) / 4);
+  const id = documentId(kind);
   // The bytes are encrypted as their base64 text rather than as a BLOB. That
   // keeps crypto.ts's surface to the one string-in, string-out door the
   // security doc pins, and the 33% it costs on disk is not worth widening it.
-  const enc = await encryptValue(vaultKey, base64, `document:${RESUME_ID}`, 'bytes_enc');
+  const enc = await encryptValue(vaultKey, base64, `document:${id}`, 'bytes_enc');
   const t = now();
   db.exec({
     sql: `INSERT INTO document (id, kind, filename, mime_type, bytes_enc, is_default, created_at)
-          VALUES (?, 'resume', ?, ?, ?, 1, ?)
+          VALUES (?, ?, ?, ?, ?, 1, ?)
           ON CONFLICT(id) DO UPDATE SET
             filename = excluded.filename, mime_type = excluded.mime_type,
             bytes_enc = excluded.bytes_enc, created_at = excluded.created_at`,
-    bind: [RESUME_ID, filename, mimeType, enc, t],
+    bind: [id, kind, filename, mimeType, enc, t],
   });
-  log('set_resume', `${filename}, ${bytes} bytes`);
+  log('set_document', `${kind}: ${filename}, ${bytes} bytes`);
   return { stored: true, meta: { filename, mimeType } };
 }
 
-function resumeRow(): { filename: string; mime_type: string; bytes_enc: Uint8Array } | undefined {
+function documentRow(
+  kind: DocumentKind,
+): { filename: string; mime_type: string; bytes_enc: Uint8Array } | undefined {
   return rows<{ filename: string; mime_type: string; bytes_enc: Uint8Array }>(
     'SELECT filename, mime_type, bytes_enc FROM document WHERE id = ? AND kind = ?',
-    [RESUME_ID, 'resume'],
+    [documentId(kind), kind],
   )[0];
 }
 
-async function readResume(vaultKey: CryptoKey): Promise<ResumeFile | null> {
-  const row = resumeRow();
+async function readDocument(vaultKey: CryptoKey, kind: DocumentKind): Promise<StoredFile | null> {
+  const row = documentRow(kind);
   if (!row) return null;
   const base64 = await decryptValue(
     vaultKey,
     new Uint8Array(row.bytes_enc),
-    `document:${RESUME_ID}`,
+    `document:${documentId(kind)}`,
     'bytes_enc',
   );
   return { filename: row.filename, mimeType: row.mime_type, base64 };
+}
+
+/** Every stored file, decrypted, by document. Absent means none stored. */
+async function readDocuments(vaultKey: CryptoKey): Promise<StoredFiles> {
+  const out: StoredFiles = {};
+  for (const kind of DOCUMENT_KINDS) {
+    const file = await readDocument(vaultKey, kind);
+    if (file) out[kind] = file;
+  }
+  return out;
+}
+
+/** Filename and type of each stored file. Never the bytes. */
+function documentsMeta(): DocumentsMeta {
+  const out: DocumentsMeta = {};
+  for (const kind of DOCUMENT_KINDS) {
+    const row = documentRow(kind);
+    // Filename and type only. The stored size would have to be derived from
+    // the ciphertext length, which is the base64 plus an IV and a tag, so any
+    // number shown here would be a plausible-looking lie.
+    if (row) out[kind] = { filename: row.filename, mimeType: row.mime_type };
+  }
+  return out;
 }
 
 /**
@@ -513,7 +632,7 @@ async function readResume(vaultKey: CryptoKey): Promise<ResumeFile | null> {
  * sensitive_value table is not read by this function at all, so there is no
  * ordering, no flag and no later filter that could go wrong and leak one.
  */
-async function readFillValues(): Promise<{ values: FillValues; resume: ResumeFile | null }> {
+async function readFillValues(): Promise<{ values: FillValues; documents: StoredFiles }> {
   const vaultKey = requireKey();
   const values: FillValues = {};
   const put = (kind: keyof FillValues, value: string | null | undefined) => {
@@ -580,7 +699,7 @@ async function readFillValues(): Promise<{ values: FillValues; resume: ResumeFil
     else if (!values.portfolio_url) put('portfolio_url', link.url);
   }
 
-  return { values, resume: await readResume(vaultKey) };
+  return { values, documents: await readDocuments(vaultKey) };
 }
 
 /**
@@ -730,7 +849,8 @@ async function exportBackup(): Promise<Backup> {
     'SELECT kind, url FROM link ORDER BY sort_order',
   ).map((l) => ({ kind: l.kind, url: l.url }));
 
-  const resume = await readResume(vaultKey);
+  const resume = await readDocument(vaultKey, 'resume');
+  const coverLetter = await readDocument(vaultKey, 'cover_letter');
   const screeningAnswers = (await readScreeningAnswers()) as Record<string, string>;
 
   log('export_backup', `${work.length} roles, ${education.length} degrees`);
@@ -753,6 +873,7 @@ async function exportBackup(): Promise<Backup> {
     education,
     links,
     resume,
+    coverLetter,
     screeningAnswers,
   };
 }
@@ -776,9 +897,17 @@ async function importBackup(
     // Refused before anything is read, encrypted or deleted.
     throw err instanceof BackupError ? new Error(err.message) : err;
   }
-  if (backup.resume) {
-    const problem = resumeProblem(backup.resume.mimeType, backup.resume.base64);
-    if (problem) throw new Error(`the résumé in that backup cannot be restored: ${problem}`);
+  const files: [DocumentKind, Backup['resume']][] = [
+    ['resume', backup.resume],
+    ['cover_letter', backup.coverLetter],
+  ];
+  for (const [kind, file] of files) {
+    if (!file) continue;
+    const problem = resumeProblem(file.mimeType, file.base64);
+    if (problem)
+      throw new Error(
+        `the ${kind.replace('_', ' ')} in that backup cannot be restored: ${problem}`,
+      );
   }
 
   // Everything encrypted BEFORE the transaction opens, as importCv does: an
@@ -791,9 +920,15 @@ async function importBackup(
       contactEnc[column] = value ? await encryptValue(vaultKey, value, 'contact:1', column) : null;
     }
   }
-  const resumeEnc = backup.resume
-    ? await encryptValue(vaultKey, backup.resume.base64, `document:${RESUME_ID}`, 'bytes_enc')
-    : null;
+  const filesEnc: [DocumentKind, NonNullable<Backup['resume']>, Uint8Array][] = [];
+  for (const [kind, file] of files) {
+    if (!file) continue;
+    filesEnc.push([
+      kind,
+      file,
+      await encryptValue(vaultKey, file.base64, `document:${documentId(kind)}`, 'bytes_enc'),
+    ]);
+  }
   const answersEnc: [string, Uint8Array][] = [];
   for (const [kind, answer] of Object.entries(backup.screeningAnswers)) {
     const trimmed = answer.trim();
@@ -818,7 +953,9 @@ async function importBackup(
     ]) {
       db.exec(`DELETE FROM ${table}`);
     }
-    db.exec({ sql: "DELETE FROM document WHERE kind = 'resume'" });
+    for (const kind of DOCUMENT_KINDS) {
+      db.exec({ sql: 'DELETE FROM document WHERE kind = ?', bind: [kind] });
+    }
 
     const p = backup.profile;
     if (p) {
@@ -879,11 +1016,11 @@ async function importBackup(
         bind: [uid(), l.kind, l.url, i],
       });
     });
-    if (backup.resume && resumeEnc) {
+    for (const [kind, file, enc] of filesEnc) {
       db.exec({
         sql: `INSERT INTO document (id, kind, filename, mime_type, bytes_enc, is_default, created_at)
-              VALUES (?, 'resume', ?, ?, ?, 1, ?)`,
-        bind: [RESUME_ID, backup.resume.filename, backup.resume.mimeType, resumeEnc, t],
+              VALUES (?, ?, ?, ?, ?, 1, ?)`,
+        bind: [documentId(kind), kind, file.filename, file.mimeType, enc, t],
       });
     }
     for (const [kind, enc] of answersEnc) {
@@ -905,6 +1042,7 @@ async function importBackup(
     links: backup.links.length,
     answers: answersEnc.length,
     resume: backup.resume ? 1 : 0,
+    coverLetter: backup.coverLetter ? 1 : 0,
   };
   log('import_backup', JSON.stringify(counts));
   return { restored: true, counts };
@@ -933,9 +1071,9 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
     await openDatabase();
     return profileView();
   },
-  async importCv({ markdown }) {
+  async importCv({ cv }) {
     await openDatabase();
-    return importCv(markdown ?? '');
+    return importCv(cv);
   },
   async fillValues() {
     await openDatabase();
@@ -949,9 +1087,9 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
     await openDatabase();
     return setScreeningAnswer(kind ?? '', answer ?? '');
   },
-  async setResume({ filename, mimeType, base64 }) {
+  async setDocument({ kind, filename, mimeType, base64 }) {
     await openDatabase();
-    return setResume(filename ?? '', mimeType ?? '', base64 ?? '');
+    return setDocument(checkDocumentKind(kind ?? ''), filename ?? '', mimeType ?? '', base64 ?? '');
   },
   async exportBackup() {
     await openDatabase();
@@ -961,17 +1099,12 @@ const handlers: Record<string, (payload: Record<string, string>) => Promise<unkn
     await openDatabase();
     return importBackup(text ?? '');
   },
-  async resumeMeta() {
+  async documents() {
     await openDatabase();
     // Metadata only. The bytes are read exactly once per fill, by the call
     // that is about to attach them.
     requireKey();
-    const row = resumeRow();
-    if (!row) return null;
-    // Filename and type only. The stored size would have to be derived from
-    // the ciphertext length, which is the base64 plus an IV and a tag, so any
-    // number shown here would be a plausible-looking lie.
-    return { filename: row.filename, mimeType: row.mime_type } satisfies ResumeMeta;
+    return documentsMeta();
   },
 };
 

@@ -65,6 +65,8 @@ export interface BackupResume {
   mimeType: string;
   base64: string;
 }
+/** The cover letter file has the same shape; the name says which it is. */
+export type BackupFile = BackupResume;
 
 /** Array order is the display order; it becomes sort_order on restore. */
 export interface Backup {
@@ -77,6 +79,13 @@ export interface Backup {
   education: BackupEducation[];
   links: BackupLink[];
   resume: BackupResume | null;
+  /**
+   * Added after version 1 shipped, as an optional field rather than a
+   * version 2: a file written before it exists simply has no cover letter,
+   * and refusing it would turn a backup made last week into one that
+   * "needs updating" for no reason the person could see.
+   */
+  coverLetter: BackupFile | null;
   screeningAnswers: Record<string, string>;
 }
 
@@ -138,6 +147,26 @@ function list(o: Json, key: string): Json[] {
     if (!isObject(item)) throw new BackupError(`${key}[${i}] is not an entry`);
     return item;
   });
+}
+
+/** A stored file in the backup: filename, type and base64 bytes, or null. */
+function fileField(raw: Json, key: string, what: string): BackupFile | null {
+  const value = raw[key];
+  if (value === null) return null;
+  if (!isObject(value)) throw new BackupError(`${key} is damaged`);
+  const file: BackupFile = {
+    filename: str(value, 'filename', key),
+    mimeType: str(value, 'mimeType', key),
+    base64: str(value, 'base64', key),
+  };
+  // Checked here, not at attach time: a file that cannot be decoded would
+  // restore "successfully" and fail weeks later on a real form.
+  try {
+    atob(file.base64);
+  } catch {
+    throw new BackupError(`${what} in that backup is damaged`);
+  }
+  return file;
 }
 
 /**
@@ -223,23 +252,11 @@ export function parseBackup(text: string): Backup {
     url: str(l, 'url', `links[${i}]`),
   }));
 
-  let resume: BackupResume | null = null;
-  if (raw.resume !== null) {
-    if (!isObject(raw.resume)) throw new BackupError('resume is damaged');
-    const r = raw.resume;
-    resume = {
-      filename: str(r, 'filename', 'resume'),
-      mimeType: str(r, 'mimeType', 'resume'),
-      base64: str(r, 'base64', 'resume'),
-    };
-    // Checked here, not at attach time: a résumé that cannot be decoded
-    // would restore "successfully" and fail weeks later on a real form.
-    try {
-      atob(resume.base64);
-    } catch {
-      throw new BackupError('the résumé in that backup is damaged');
-    }
-  }
+  const resume = fileField(raw, 'resume', 'the résumé');
+  // Missing, not just null, is accepted: files written before the cover
+  // letter existed have no such key. See the type.
+  const coverLetter =
+    raw.coverLetter === undefined ? null : fileField(raw, 'coverLetter', 'the cover letter');
 
   if (!isObject(raw.screeningAnswers)) throw new BackupError('screeningAnswers is damaged');
   const known = new Set<string>(SCREENING_KINDS);
@@ -254,7 +271,7 @@ export function parseBackup(text: string): Backup {
 
   // Refused for the same reason importCv refuses: a restore replaces what is
   // there, so an empty file would be a wipe with nothing to show for it.
-  if (!profile && work.length === 0 && education.length === 0 && !resume) {
+  if (!profile && work.length === 0 && education.length === 0 && !resume && !coverLetter) {
     throw new BackupError('that backup is empty, so nothing was changed');
   }
 
@@ -268,6 +285,7 @@ export function parseBackup(text: string): Backup {
     education,
     links,
     resume,
+    coverLetter,
     screeningAnswers,
   };
 }

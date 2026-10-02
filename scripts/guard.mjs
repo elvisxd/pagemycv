@@ -257,6 +257,10 @@ forbid(/exportKey|extractable\s*:\s*true/, 'an extractable key');
 forbid(/chrome\s*\??\.\s*scripting\b/, 'chrome.scripting outside the one door', [
   'src/fill/inject.ts',
 ]);
+// pdf.js parses a file the person chose, in the side panel. One importer means
+// one place that configures it to fetch nothing, and one place to read when
+// the dependency is updated.
+forbid(/pdfjs-dist/, 'pdf.js outside the one door', ['src/import/pdf-text.ts']);
 
 // ── Dependencies ────────────────────────────────────────────────────────────
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));

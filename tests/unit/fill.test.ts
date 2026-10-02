@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { atsForUrl } from '../../src/ats/registry';
 import { classify } from '../../src/fill/detect';
 import { honeypotReason } from '../../src/fill/honeypot';
-import { buildPlan, chooseOption, planNeedsResume } from '../../src/fill/plan';
+import { buildPlan, chooseOption, planNeedsDocument } from '../../src/fill/plan';
 import { SENSITIVE_MATCHER_KEYS, sensitiveKeyFor } from '../../src/fill/sensitive-match';
 import type { FieldDescriptor, FillValues, VisibilityMetrics } from '../../src/fill/types';
 import { visibilityProblem } from '../../src/fill/visibility';
@@ -58,7 +58,7 @@ const LEVER = atsForUrl('https://jobs.lever.co/acme/1234');
 const GREENHOUSE = atsForUrl('https://boards.greenhouse.io/acme/jobs/42');
 
 function plan(fields: FieldDescriptor[], values: FillValues, ats = LEVER, resume?: string) {
-  return buildPlan(fields, classify(fields, ats), values, ats, resume ?? null);
+  return buildPlan(fields, classify(fields, ats), values, ats, resume ? { resume } : {});
 }
 
 // ── The ATS registry ────────────────────────────────────────────────────────
@@ -473,13 +473,51 @@ describe('buildPlan', () => {
     expect(row.reason).toBe('no-value');
   });
 
-  it('never writes a cover letter, even when it recognises the field', () => {
+  // The cover letter used to be refused outright ('never-auto'). It is a
+  // screening kind now: it fills from the letter the person typed and
+  // stored, or it does not fill at all — never from the CV, never generated.
+  it('leaves a cover letter box for you when no letter is stored', () => {
     const f = field({ tag: 'textarea', type: 'textarea', label: 'Cover letter' });
     const [row] = plan([f], { ...VALUES }).fields;
     if (row?.action !== 'skip') throw new Error('expected a skip');
-    // Its own reason, not 'no-value'. "We hold nothing for this" and "we hold
-    // something and refuse to write it" are different promises to the user.
-    expect(row.reason).toBe('never-auto');
+    expect(row.reason).toBe('unanswered');
+  });
+
+  it('writes YOUR stored cover letter into the box, and nothing from the CV', () => {
+    const f = field({ tag: 'textarea', type: 'textarea', label: 'Cover letter' });
+    const letter = 'Dear team, I would like to apply.';
+    const [row] = buildPlan(
+      [f],
+      classify([f], LEVER),
+      VALUES,
+      LEVER,
+      {},
+      {
+        cover_letter: letter,
+      },
+    ).fields;
+    if (row?.action !== 'fill') throw new Error('expected a fill');
+    expect(row.value).toBe(letter);
+    expect(row.kind).toBe('cover_letter');
+  });
+
+  it('attaches the stored cover letter FILE when the form asks for one as a file', () => {
+    const f = field({ type: 'file', name: 'cover_letter', label: 'Cover letter' });
+    const [row] = buildPlan([f], classify([f], LEVER), VALUES, LEVER, {
+      resume: 'cv.pdf',
+      cover_letter: 'letter.pdf',
+    }).fields;
+    if (row?.action !== 'attach') throw new Error('expected an attach');
+    expect(row.filename).toBe('letter.pdf');
+    expect(row.kind).toBe('cover_letter');
+  });
+
+  it('never attaches the résumé where a cover letter file was asked for', () => {
+    const f = field({ type: 'file', name: 'cover_letter', label: 'Cover letter' });
+    const [row] = buildPlan([f], classify([f], LEVER), VALUES, LEVER, { resume: 'cv.pdf' }).fields;
+    if (row?.action !== 'skip') throw new Error('expected a skip');
+    expect(row.reason).toBe('no-value');
+    expect(row.detail).toMatch(/no cover letter file is stored/);
   });
 
   it('attaches the resume rather than typing a path into the file input', () => {
@@ -600,7 +638,7 @@ describe('chooseOption, after the review', () => {
   });
 });
 
-describe('planNeedsResume', () => {
+describe('planNeedsDocument', () => {
   it('is false for a form with no file input, so the CV never leaves the vault', () => {
     // Most application pages have no file input at all. Sending the bytes
     // regardless would put the whole CV in a page's process on every fill.
@@ -608,16 +646,16 @@ describe('planNeedsResume', () => {
       field({ name: 'name', label: 'Full name' }),
       field({ name: 'email', type: 'email', label: 'Email' }),
     ];
-    expect(planNeedsResume(plan(fields, VALUES, LEVER, 'cv.pdf'))).toBe(false);
+    expect(planNeedsDocument(plan(fields, VALUES, LEVER, 'cv.pdf'), 'resume')).toBe(false);
   });
 
   it('is false when a resume field exists but nothing is stored', () => {
     const fields = [field({ type: 'file', name: 'resume', label: 'Resume' })];
-    expect(planNeedsResume(plan(fields, VALUES))).toBe(false);
+    expect(planNeedsDocument(plan(fields, VALUES), 'resume')).toBe(false);
   });
 
   it('is true only when the plan actually attaches something', () => {
     const fields = [field({ type: 'file', name: 'resume', label: 'Resume' })];
-    expect(planNeedsResume(plan(fields, VALUES, LEVER, 'cv.pdf'))).toBe(true);
+    expect(planNeedsDocument(plan(fields, VALUES, LEVER, 'cv.pdf'), 'resume')).toBe(true);
   });
 });

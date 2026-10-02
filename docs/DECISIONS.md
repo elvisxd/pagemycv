@@ -135,6 +135,47 @@ forced by evidence rather than by taste.
 | **More boards, declared with empty maps** | **Workable, SmartRecruiters, Jobvite: hosts yes, maps no** | A host from the documented table costs one manifest line and buys embeds filling without the icon click. A map written without seeing the form is a hypothesis with a confidence score; an empty one lets the standards-based passes carry it, and a field they miss is reported as unrecognised rather than guessed. |
 | **An unknown site is a definition** | **`UNKNOWN` has an empty map and is chosen like any board** | It used to be a refusal, which made "a site we have not named" indistinguishable from "no form here". `chooseFrame` now ranks on what a frame holds, not on whose it is. |
 
+## Decided while building the file import
+
+- [x] **pdf.js, pinned, behind one door.** The first dependency added since
+      the colour palette, and a heavy one: the panel bundle grows fourteen
+      times and the extension doubles on disk. Taken because the alternative
+      was asking people for a Markdown CV nobody has, and because nothing
+      lighter reads a PDF honestly. Its worker is bundled, it is given no URL,
+      and only `src/import/pdf-text.ts` may import it — the guard refuses a
+      second importer the way it refuses a second `crypto.subtle`.
+- [x] **Word files without a dependency.** A `.docx` is a zip with an XML
+      entry; `DecompressionStream` and `DOMParser` read it. Measured first
+      (`spikes/cv-file/docx-native.mjs`), against a file with runs split
+      mid-word the way Word leaves them. The old binary `.doc` is refused with
+      instructions, not read badly.
+- [x] **Columns before lines.** pdf.js returns positioned runs, and grouping
+      them by baseline interleaves a two-column CV line by line. The reader
+      finds a vertical gutter no run crosses and reads one side before the
+      other; a one-column page must stay one column, and does. Load-bearing
+      by revert: without it exactly the two-column gate check fails, with
+      "title: Caracas, employer: Venezuela" in its detail.
+- [x] **Nothing the reader proposes is stored without being shown.** The
+      heuristics are good on the CVs they were written against and unknown
+      on the rest. A review form stands between the file and the vault, every
+      field editable, Save explicit. The gate changes a field by hand before
+      saving and asserts the vault holds the change. Markdown goes through the
+      same form, so there is one path and one set of eyes.
+- [x] **The cover letter fills from yours, never from a generator.** It was
+      in NEVER_AUTOFILL with the note that a generic letter is worse than an
+      empty box. That is true of a generated one and nothing here generates.
+      A letter the person typed and stored is theirs; it moved to
+      SCREENING_KINDS — the same route `notice_period` took — and a file
+      input asking for a cover letter gets the stored cover letter file, with
+      a test that it never gets the résumé.
+- [x] **The backup's new field is optional, not a version 2.** A backup made
+      before the cover letter existed restores without complaint; a version
+      bump would have refused it for a reason nobody could see.
+- [x] **The reader warns rather than guesses.** No email, no phone, a role
+      without dates, no Experience section: each is a line above the form,
+      not a filled-in guess. A field left empty is corrected in a second; a
+      wrong one typed into an application is not.
+
 ## Still open
 
 The one thing that could have changed the shape of the project is settled.

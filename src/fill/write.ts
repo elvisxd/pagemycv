@@ -14,8 +14,10 @@ import type {
   ListboxAction,
   ListboxSelectors,
   PlannedField,
-  ResumeFile,
+  StoredFile,
+  StoredFiles,
 } from './types';
+import { documentFor } from './types';
 
 /**
  * Assign through the prototype's own setter.
@@ -99,9 +101,9 @@ export function clearHighlights(elements: Iterable<Control>): void {
  * framework sees it after the change event. tests/e2e/gate.cjs asserts the
  * file is actually there afterwards rather than trusting that.
  */
-function attachFile(el: HTMLInputElement, resume: ResumeFile): void {
-  const bytes = fromBase64(resume.base64);
-  const file = new File([bytes], resume.filename, { type: resume.mimeType });
+function attachFile(el: HTMLInputElement, stored: StoredFile): void {
+  const bytes = fromBase64(stored.base64);
+  const file = new File([bytes], stored.filename, { type: stored.mimeType });
   const transfer = new DataTransfer();
   transfer.items.add(file);
   el.files = transfer.files;
@@ -111,7 +113,7 @@ function attachFile(el: HTMLInputElement, resume: ResumeFile): void {
 export function applyPlan(
   fields: readonly PlannedField[],
   elements: Map<string, Control>,
-  resume: ResumeFile | null,
+  documents: StoredFiles,
   url: string,
   ats: string,
 ): FillReport {
@@ -166,11 +168,13 @@ export function applyPlan(
     }
     try {
       if (field.action === 'attach') {
-        if (!resume || !(el instanceof HTMLInputElement)) {
+        const document = documentFor(field.kind);
+        const stored = document ? documents[document] : undefined;
+        if (!stored || !(el instanceof HTMLInputElement)) {
           failures.push({ ref: field.ref, label: field.label, detail: 'no file to attach' });
           continue;
         }
-        attachFile(el, resume);
+        attachFile(el, stored);
         highlight(el);
         attached++;
         continue;

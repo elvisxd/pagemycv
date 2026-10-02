@@ -8,29 +8,29 @@ import { sensitiveByKey } from '../sensitive/registry';
 import { honeypotReason } from './honeypot';
 import type {
   Classification,
+  DocumentKind,
   FieldDescriptor,
-  FieldKind,
   FillPlan,
   FillValues,
   PlannedField,
   ScreeningAnswers,
+  StoredFilenames,
 } from './types';
-import { isScreeningKind } from './types';
+import { documentFor, isScreeningKind } from './types';
 import { visibilityProblem } from './visibility';
 
-/** Kinds we never write even when we could: they need a file or a person. */
-const NEVER_AUTOFILL: ReadonlySet<FieldKind> = new Set<FieldKind>([
-  // Phase 5. Writing a generic cover letter into a real application on the
-  // user's behalf is worse than leaving it empty.
-  'cover_letter',
-  // `notice_period` and `how_did_you_hear` used to be here, refused with
-  // "we hold no answer for these, and a plausible guess is the failure mode
-  // this whole design exists to avoid". That was right while there was
-  // nowhere to put an answer. There is now, so they moved to SCREENING_KINDS
-  // — which keeps the same guarantee by a better route: they fill from an
-  // answer you typed or they do not fill at all. Never from the CV, never
-  // from a guess.
-]);
+// There used to be a NEVER_AUTOFILL set here, holding `cover_letter`, and
+// before that `notice_period` and `how_did_you_hear`. Each left it the same
+// way: once there was a place for the person to put their own answer, the
+// refusal became SCREENING_KINDS — fill from what they typed or not at all.
+// The guarantee the set gave (never from the CV, never from a guess) is kept
+// by the type: a screening kind cannot be satisfied from `values`.
+
+/** What each document is called when it is missing, in the review list. */
+const DOCUMENT_NAMES: Record<DocumentKind, string> = {
+  resume: 'resume file',
+  cover_letter: 'cover letter file',
+};
 
 const WRITABLE_TAGS: ReadonlySet<string> = new Set(['input', 'select', 'textarea']);
 
@@ -101,8 +101,8 @@ export function buildPlan(
   classifications: readonly Classification[],
   values: FillValues,
   ats: AtsDefinition,
-  /** Filename only. The bytes never pass through the planner. */
-  resumeFilename: string | null = null,
+  /** Filenames only. The bytes never pass through the planner. */
+  documents: StoredFilenames = {},
   /** Your own answers to the screening questions. See SCREENING_KINDS. */
   answers: ScreeningAnswers = {},
 ): FillPlan {
@@ -156,17 +156,24 @@ export function buildPlan(
       continue;
     }
 
-    if (c.kind === 'resume_file') {
+    const isFileInput = field.tag === 'input' && field.type === 'file';
+    const document = documentFor(c.kind);
+    // A cover letter can be asked for as a file or as a box to type in. The
+    // file input attaches the stored file; the box is a screening kind and
+    // falls through to the answer the person typed. A résumé is only ever a
+    // file.
+    if (c.kind === 'resume_file' || (document && isFileInput)) {
       // A file input takes a File, never a string. Typing a path into one
       // does nothing at all, which is why this is its own action rather than
       // a value lookup, and why it is decided before the writability check
       // that would otherwise reject every file input.
-      if (field.tag !== 'input' || field.type !== 'file') {
+      if (!isFileInput || !document) {
         skip('unsupported', 'this asks for a resume but is not a file input');
         continue;
       }
-      if (!resumeFilename) {
-        skip('no-value', 'no resume file is stored yet');
+      const filename = documents[document];
+      if (!filename) {
+        skip('no-value', `no ${DOCUMENT_NAMES[document]} is stored yet`);
         continue;
       }
       planned.push({
@@ -174,10 +181,11 @@ export function buildPlan(
         ref: field.ref,
         fingerprint: field.fingerprint,
         label,
-        kind: 'resume_file',
+        // Narrowed by `document` above: only these two kinds name a file.
+        kind: c.kind === 'resume_file' ? 'resume_file' : 'cover_letter',
         strategy: c.strategy,
         confidence: c.confidence,
-        filename: resumeFilename,
+        filename,
       });
       continue;
     }
@@ -186,14 +194,6 @@ export function buildPlan(
       skip('unsupported', `a ${field.type || field.tag} control is not filled in this phase`);
       continue;
     }
-    if (NEVER_AUTOFILL.has(c.kind)) {
-      // Its own reason, not 'no-value': "we hold nothing for this" and "we
-      // hold something and refuse to write it" are different promises, and
-      // the review list should not blur them.
-      skip('never-auto', `${c.kind.replace(/_/g, ' ')} is never written automatically`);
-      continue;
-    }
-
     // Screening kinds read from a different map on purpose. Provenance lives
     // in the type rather than in a convention: there is no way to satisfy one
     // of these from `values`, so no future edit to the CV parser can start
@@ -254,16 +254,26 @@ export function buildPlan(
 }
 
 /**
- * Whether this plan has anywhere to put the resume.
+ * Whether this plan has anywhere to put a given document.
  *
- * The bytes cross into the page's process only when the answer is yes. Most
+ * Its bytes cross into the page's process only when the answer is yes. Most
  * application forms have one file input and many have none, and sending the
  * whole CV either way would undo the reason the plan is built in the
- * background rather than in the tab.
+ * background rather than in the tab. Asked per document, so a form with a
+ * résumé input and no cover-letter input receives the résumé and nothing else.
  */
-export function planNeedsResume(plan: FillPlan): boolean {
-  return plan.fields.some((f) => f.action === 'attach');
+export function planNeedsDocument(plan: FillPlan, document: DocumentKind): boolean {
+  return plan.fields.some((f) => f.action === 'attach' && documentFor(f.kind) === document);
 }
 
-/** Exposed so the gate can assert the list rather than trust the comment. */
-export const NEVER_AUTOFILL_KINDS: readonly FieldKind[] = [...NEVER_AUTOFILL];
+/** The documents a plan attaches, from those stored. */
+export function documentsFor<T>(
+  plan: FillPlan,
+  stored: Partial<Record<DocumentKind, T>>,
+): Partial<Record<DocumentKind, T>> {
+  const out: Partial<Record<DocumentKind, T>> = {};
+  for (const [kind, file] of Object.entries(stored) as [DocumentKind, T][]) {
+    if (file && planNeedsDocument(plan, kind)) out[kind] = file;
+  }
+  return out;
+}

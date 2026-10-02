@@ -3,21 +3,17 @@
 // context where SQLite's OPFS backend can open a synchronous file handle.
 //
 // It also outlives the service worker, which is terminated after 30 seconds of
-// idle. That is why the vault key lives down here rather than up there.
+// idle, so the worker it owns — and the open vault inside it — survives that.
 //
-// Since the passphrase went away it has a second job: OPENING the vault. The
-// worker cannot do that itself — `chrome` is undefined inside a dedicated
-// worker, measured rather than assumed (spikes/phase-5) — so the key material
-// is loaded here and handed down. Everything below the relay exists to make
-// sure that has happened before any command that needs the key runs.
+// It is a relay and nothing more. The vault key is NOT here: an offscreen
+// document has `chrome.runtime` and no `chrome.storage` (found by the gate when
+// a first design put the key store here and every open failed), so the service
+// worker loads the key and sends it down through this document to the worker.
+// The dead imports that used to sit below were left over from that first
+// design.
 
-import type { VaultState } from '../../db/schema';
 import type { DbProtocol } from '../../messaging/db';
 import { onDb } from '../../messaging/db';
-import { fromBase64, toBase64 } from '../../util/base64';
-import { convertVault } from '../../vault/convert';
-import { deriveKeyMaterial, newKeyMaterial } from '../../vault/crypto';
-import { loadKeyMaterial, saveKeyMaterial } from '../../vault/key-store';
 
 /**
  * How long a single database command may take before the caller gives up.
@@ -127,8 +123,8 @@ const COMMANDS: Record<Exclude<keyof DbProtocol, 'db:ping'>, string> = {
   'db:profile': 'profile',
   'db:importCv': 'importCv',
   'db:fillValues': 'fillValues',
-  'db:setResume': 'setResume',
-  'db:resumeMeta': 'resumeMeta',
+  'db:setDocument': 'setDocument',
+  'db:documents': 'documents',
   'db:exportBackup': 'exportBackup',
   'db:importBackup': 'importBackup',
 };

@@ -22,7 +22,7 @@ import { chooseFrame, describeFrame } from '../fill/frames';
 import { injectContentScript, isAccessRefused } from '../fill/inject';
 import { planListboxes } from '../fill/listbox';
 import { reachForm } from '../fill/on-demand';
-import { buildPlan, planNeedsResume } from '../fill/plan';
+import { buildPlan, documentsFor } from '../fill/plan';
 import { isNoListener, rollCall } from '../fill/roll-call';
 import type { FillReport } from '../fill/types';
 import type { DbProtocol } from '../messaging/db';
@@ -288,21 +288,17 @@ async function fillActiveTab(): Promise<FillReport> {
 
   // The values are fetched only once a form is known to exist, so opening the
   // panel on a job description never decrypts anything.
-  const { values, resume } = await sendDb('db:fillValues', undefined);
+  const { values, documents } = await sendDb('db:fillValues', undefined);
   // Fetched beside the values, and kept apart from them all the way into the
   // planner. A screening question can only ever be answered from here, so
   // there is no path by which the CV parser could start answering one by
   // inference — which is the guarantee the old outright refusal gave, kept.
   const answers = await sendDb('db:screeningAnswers', undefined);
   const classifications = classify(survey.fields, ats);
-  const plan = buildPlan(
-    survey.fields,
-    classifications,
-    values,
-    ats,
-    resume?.filename ?? null,
-    answers,
+  const filenames = Object.fromEntries(
+    Object.entries(documents).map(([kind, file]) => [kind, file?.filename]),
   );
+  const plan = buildPlan(survey.fields, classifications, values, ats, filenames, answers);
   // Planned here, in the background, for the same reason the fields are: the
   // content script is handed the one value it is going to write and never
   // the profile it came from.
@@ -315,9 +311,9 @@ async function fillActiveTab(): Promise<FillReport> {
 
   const report = await sendFill(
     'fill:apply',
-    // The bytes cross into the page's process only when the plan has
-    // somewhere to put them. See planNeedsResume.
-    { plan, resume: planNeedsResume(plan) ? resume : null, generation: survey.generation },
+    // A file's bytes cross into the page's process only when the plan has
+    // somewhere to put that file. See planNeedsDocument.
+    { plan, documents: documentsFor(plan, documents), generation: survey.generation },
     target,
   );
   // Where it filled, when that was not the page itself. Silence would be
@@ -356,10 +352,10 @@ const ROUTES: Record<keyof VaultProtocol, keyof DbProtocol | 'local'> = {
   'vault:convert': 'local',
   'vault:profile': 'db:profile',
   'vault:importCv': 'db:importCv',
-  'vault:resumeMeta': 'db:resumeMeta',
+  'vault:documents': 'db:documents',
   'vault:exportBackup': 'db:exportBackup',
   'vault:importBackup': 'db:importBackup',
-  'vault:setResume': 'db:setResume',
+  'vault:setDocument': 'db:setDocument',
   'vault:screeningAnswers': 'db:screeningAnswers',
   'vault:setScreeningAnswer': 'db:setScreeningAnswer',
   'vault:fill': 'local',

@@ -100,7 +100,7 @@ export default defineContentScript({
       const report = applyPlan(
         data.plan.fields,
         elements,
-        data.resume,
+        data.documents,
         location.href,
         data.plan.ats,
       );

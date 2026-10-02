@@ -157,7 +157,7 @@ describe('applyPlan', () => {
     for (const type of ['input', 'change', 'keydown', 'keyup', 'submit']) {
       el.addEventListener(type, (e) => seen.push(e.type));
     }
-    const report = applyPlan([fillAction()], new Map([['f0', el]]), null, 'u', 'lever');
+    const report = applyPlan([fillAction()], new Map([['f0', el]]), {}, 'u', 'lever');
     expect(el.value).toBe('ada@lovelace.test');
     expect(report.filled).toBe(1);
     expect(seen).toEqual(['input', 'change']);
@@ -178,7 +178,7 @@ describe('applyPlan', () => {
         throughInstance = true;
       },
     });
-    applyPlan([fillAction()], new Map([['f0', el]]), null, 'u', 'lever');
+    applyPlan([fillAction()], new Map([['f0', el]]), {}, 'u', 'lever');
     expect(throughInstance).toBe(false);
   });
 
@@ -186,7 +186,7 @@ describe('applyPlan', () => {
     render('<input name="email">');
     const el = control('input');
     el.remove();
-    const report = applyPlan([fillAction()], new Map([['f0', el]]), null, 'u', 'lever');
+    const report = applyPlan([fillAction()], new Map([['f0', el]]), {}, 'u', 'lever');
     expect(report.filled).toBe(0);
     expect(report.failures[0]?.detail).toMatch(/removed from the page/);
   });
@@ -199,7 +199,7 @@ describe('applyPlan', () => {
     render('<input name="email" type="text">');
     const el = control('input');
     el.setAttribute('name', 'salary_expected');
-    const report = applyPlan([fillAction()], new Map([['f0', el]]), null, 'u', 'lever');
+    const report = applyPlan([fillAction()], new Map([['f0', el]]), {}, 'u', 'lever');
     expect(report.filled).toBe(0);
     expect(el.value).toBe('');
     expect(report.failures[0]?.detail).toMatch(/changed while the plan was being built/);
@@ -219,7 +219,7 @@ describe('applyPlan', () => {
         }),
       ],
       new Map([['f0', el]]),
-      null,
+      {},
       'u',
       'lever',
     );
@@ -242,7 +242,7 @@ describe('applyPlan', () => {
         },
       ],
       new Map([['f0', el]]),
-      null,
+      {},
       'u',
       'lever',
     );
@@ -254,7 +254,7 @@ describe('applyPlan', () => {
   it("restores the page's own outline styling exactly", () => {
     render('<input name="email" style="outline: 1px dashed red; outline-offset: 4px">');
     const el = control('input');
-    applyPlan([fillAction()], new Map([['f0', el]]), null, 'u', 'lever');
+    applyPlan([fillAction()], new Map([['f0', el]]), {}, 'u', 'lever');
     expect(el.style.outline).not.toBe('1px dashed red');
     clearHighlights([el]);
     expect(el.style.outline).toBe('1px dashed red');

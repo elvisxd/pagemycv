@@ -69,9 +69,12 @@
       <option value="no">No</option>
     </select>
 
-    <!-- A cover letter box: never written automatically. -->
+    <!-- A cover letter box: filled only from a letter YOU stored, never generated. -->
     <label for="c_cl">Cover letter</label>
     <textarea id="c_cl" name="candidate[letter]"></textarea>
+    <!-- And the same question asked as a file. Attached only from a stored file. -->
+    <label for="c_clf">Cover letter file</label>
+    <input id="c_clf" name="candidate[letter_file]" type="file">
 
     <!-- The trap: off-screen and unlabelled. Both layers must refuse it. -->
     <input class="trap" name="website" type="text" tabindex="-1" aria-hidden="true">

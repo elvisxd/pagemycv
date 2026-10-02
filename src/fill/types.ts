@@ -89,6 +89,14 @@ export const SCREENING_KINDS: readonly FieldKind[] = [
   'travel_ok',
   'relocation_ok',
   'security_clearance',
+  // The cover letter box. It used to be refused outright — "writing a
+  // generic cover letter on the user's behalf is worse than leaving it
+  // empty" — and that stays true of a GENERATED one. One the person wrote
+  // and stored is theirs, and the same rule as every kind above applies: it
+  // fills from what they typed or it does not fill at all. A file input
+  // asking for a cover letter is a different thing and attaches the stored
+  // file instead; see plan.ts.
+  'cover_letter',
 ];
 
 export function isScreeningKind(kind: FieldKind): boolean {
@@ -195,7 +203,6 @@ export type SkipReason =
   | 'sensitive'
   | 'unrecognised'
   | 'unsupported'
-  | 'never-auto'
   /**
    * A screening question you have not answered yet.
    *
@@ -230,7 +237,8 @@ export type PlannedField =
       ref: string;
       fingerprint: string;
       label: string;
-      kind: 'resume_file';
+      /** Which stored file goes in: the résumé, or the cover letter. */
+      kind: 'resume_file' | 'cover_letter';
       strategy: MatchStrategy;
       confidence: number;
       /** The filename shown in the review list; the bytes travel separately. */
@@ -270,28 +278,49 @@ export interface FillPlan {
 export type FillValues = Partial<Record<FieldKind, string>>;
 
 /**
- * The stored resume, carried beside the values because it is bytes rather than
- * a string. Base64 because the messaging layer serialises to JSON, and a
+ * The files a vault stores for attaching: the résumé, and the cover letter.
+ * One row each, replaced on upload. The attach action names the field kind
+ * (`resume_file`, `cover_letter`); this names the document.
+ */
+export type DocumentKind = 'resume' | 'cover_letter';
+export const DOCUMENT_KINDS: readonly DocumentKind[] = ['resume', 'cover_letter'];
+
+/** The document a field kind attaches, or null for a kind that is typed. */
+export function documentFor(kind: FieldKind): DocumentKind | null {
+  if (kind === 'resume_file') return 'resume';
+  if (kind === 'cover_letter') return 'cover_letter';
+  return null;
+}
+
+/**
+ * A stored file, carried beside the values because it is bytes rather than a
+ * string. Base64 because the messaging layer serialises to JSON, and a
  * Uint8Array survives that as an object with numeric keys — silently, which is
  * the failure mode worth spending a few percent of size to avoid.
  */
-export interface ResumeFile {
+export interface StoredFile {
   filename: string;
   mimeType: string;
   base64: string;
 }
 
+/** The stored files, by document, for the one call that is about to use them. */
+export type StoredFiles = Partial<Record<DocumentKind, StoredFile>>;
+/** Filenames only, for the planner: the bytes never pass through it. */
+export type StoredFilenames = Partial<Record<DocumentKind, string>>;
+
 /** What the background sends the content script. Never a sensitive value. */
 export interface FillRequest {
   plan: FillPlan;
   /**
-   * Present only when the plan actually has something to attach it to.
+   * Each file present only when the plan actually has something to attach it
+   * to.
    *
-   * Sending it regardless would put the whole CV in a page's process on every
-   * fill, including the many forms with no file input at all, which is the
-   * opposite of the reason the plan is built in the background.
+   * Sending them regardless would put the whole CV in a page's process on
+   * every fill, including the many forms with no file input at all, which is
+   * the opposite of the reason the plan is built in the background.
    */
-  resume: ResumeFile | null;
+  documents: StoredFiles;
   /**
    * The describe pass this plan was built from. The content script refuses a
    * plan from an older pass, so two fills racing cannot apply one plan to the
