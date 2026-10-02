@@ -1,0 +1,36 @@
+{
+  "question": "can a Preferences-file grant stand in for the person clicking Allow?",
+  "results": {
+    "extId": "cnjpjebdpiimlfgfpahgdjnbgdpjlbhd",
+    "settingsKeys": [
+      "ahfgeienlihckogmohjhadlkjgocpleb",
+      "cnjpjebdpiimlfgfpahgdjnbgdpjlbhd",
+      "mhjfbmdgcfjbbpaeojofohoefgiehjai"
+    ],
+    "containsAfterPrefsGrant": false,
+    "getAll": {
+      "origins": [],
+      "permissions": [
+        "activeTab",
+        "scripting"
+      ]
+    },
+    "injectTopOnly_allFrames": {
+      "ok": false,
+      "error": "Cannot access contents of the page. Extension manifest must request permission to access the respective host."
+    },
+    "injectTopOnly_topFrame": {
+      "ok": false,
+      "error": "Cannot access contents of the page. Extension manifest must request permission to access the respective host."
+    },
+    "injectBoth_allFrames": {
+      "ok": false,
+      "error": "Cannot access contents of the page. Extension manifest must request permission to access the respective host."
+    },
+    "removeOwnGrant": {
+      "ok": true,
+      "removed": true
+    },
+    "containsAfterRemove": false
+  }
+}

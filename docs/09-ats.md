@@ -210,14 +210,26 @@ thirty come from label heuristics, the per-ATS maps above, and finally from you.
 
 ## Per-ATS status
 
-| ATS | Phase | Map verified against a live page |
-|---|---|---|
-| Lever | 2 · built | No — against a fixture built from public page source |
-| Greenhouse | 2 · built | No — against a fixture built from public page source |
-| Ashby | Unplanned | No |
-| Greenhouse embedded | 3 · built | No — against a fixture built from the documented embed shape |
-| Workday | 4 | No |
-| iCIMS, Taleo, SmartRecruiters | Unplanned | No |
+| ATS | Status | Map | Verified against a live page |
+|---|---|---|---|
+| Lever | built | yes | No — against a fixture built from public page source |
+| Greenhouse | built | yes | No — against a fixture built from public page source |
+| Greenhouse embedded | built | yes | No — against a fixture built from the documented embed shape |
+| Ashby | built | thin | Labels copied from a real application form |
+| Workday | PR #8 | yes, unverified | No — needs a real tenant |
+| Workable | declared, no map | — | No. Host from the table above; the form fills from labels alone |
+| SmartRecruiters | declared, no map | — | No. Same |
+| Jobvite | declared, no map | — | No. Same |
+| iCIMS, Taleo | not declared | — | Tenant subdomains; need the `*.` host form PR #8 adds |
+| **Any other site** | **on demand** | — | The same script, injected into the active tab after a click on the icon. See `src/fill/inject.ts` and `spikes/phase-6` |
+
+"Declared, no map" is a deliberate state, not an unfinished one. The host is
+documented, the form is not, and a map written from guesswork is a
+hypothesis wearing a confidence score. With an empty map pass 2 contributes
+nothing and the standards-based passes carry the form — which is exactly
+what happens on a site nobody has named. Declaring the host buys one thing:
+the content script is already there, so an application embedded in a
+company careers page fills without the person clicking the icon first.
 
 Update the right-hand column as `ats-probe` runs. **A map nobody probed is a
 hypothesis**, and that is still true of both Phase 2 maps: the gate proves the

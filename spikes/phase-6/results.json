@@ -1,0 +1,32 @@
+{
+  "question": "which on-demand injection route can a headless Playwright gate drive?",
+  "results": {
+    "coldInject": {
+      "ok": false,
+      "error": "Cannot access contents of the page. Extension manifest must request permission to access the respective host."
+    },
+    "requestNoGesture": {
+      "ok": false,
+      "error": "This function must be called during a user gesture"
+    },
+    "afterKeyboardCommand": {
+      "command": null,
+      "inject": null
+    },
+    "afterExecuteAction": {
+      "clicked": null,
+      "inject": null
+    },
+    "afterContextGrant": {
+      "ok": false,
+      "error": "Cannot access contents of the page. Extension manifest must request permission to access the respective host."
+    },
+    "granted": {
+      "origins": [],
+      "permissions": [
+        "activeTab",
+        "scripting"
+      ]
+    }
+  }
+}

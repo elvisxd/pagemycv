@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { boardList } from '../../ats/registry';
 import { type Backup, parseBackup, serializeBackup } from '../../backup/format';
 import type { ProfileView, ResumeMeta, VaultState } from '../../db/schema';
 import type { FieldKind, FillReport, PlannedField, ScreeningAnswers } from '../../fill/types';
@@ -519,9 +520,10 @@ export function App() {
       <Section title="Fill a form">
         <div style={{ padding: 12 }}>
           <p style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
-            Open a Lever or Greenhouse application in the active tab. PageMyCV fills what it
-            recognises, highlights every value it wrote, and never submits: the last click is always
-            yours.
+            Open an application form in the active tab. On {boardList('or')} it fills at once; on
+            any other site, click the PageMyCV icon in the toolbar first so Chrome lets it read that
+            one page. It fills what it recognises, highlights every value it wrote, and never
+            submits: the last click is always yours.
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button onClick={fill} disabled={filling || busy}>

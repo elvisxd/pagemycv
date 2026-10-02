@@ -39,15 +39,25 @@ describe('chooseFrame', () => {
     expect(chooseFrame([greenhouse({ fields: 0 })])).toBeNull();
   });
 
-  it('ignores a frame whose origin is not a board we know', () => {
-    // Defence in depth: the content script should never be in such a frame,
-    // but the roster is built from what frames report about themselves.
-    const stranger: FrameReport = {
+  it('takes a frame on an origin no board names, when it holds a form', () => {
+    // This used to be refused as defence in depth: the script should never be
+    // in such a frame. It can be now — on-demand injection puts it into
+    // whichever tab the person pointed at — and an unknown origin is a
+    // definition with an empty map, not a stranger. What a frame says about
+    // its URL still decides only which map applies; the values it receives
+    // go into its own form, which it could read anyway.
+    const unknown: FrameReport = {
       frameId: 2,
-      url: 'https://ads.example.test/pixel',
+      url: 'https://careers.some-company.test/apply',
       fields: 5,
     };
-    expect(chooseFrame([stranger])).toBeNull();
+    expect(chooseFrame([unknown])?.frame).toBe(unknown);
+  });
+
+  it('still ignores such a frame when it holds no form', () => {
+    expect(
+      chooseFrame([{ frameId: 2, url: 'https://ads.example.test/pixel', fields: 0 }]),
+    ).toBeNull();
   });
 
   it('prefers the frame with the most fields when a page embeds two', () => {

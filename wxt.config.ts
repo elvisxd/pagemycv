@@ -16,9 +16,22 @@ export default defineConfig({
     // the vault key, which replaced the passphrase. It is the whole reason the
     // permission is here, so src/vault/key-store.ts is the only module allowed
     // to use it and the guard enforces that. No host permissions: the content
-    // script is declared per board instead, so the extension can never be
-    // granted a page it was not built for.
-    permissions: ['offscreen', 'unlimitedStorage', 'sidePanel', 'storage'],
+    // script is declared per board, and anywhere else only the active tab,
+    // after a click, so the extension is never granted a page nobody pointed
+    // it at.
+    // 'activeTab' + 'scripting': the content script can be put into the tab
+    // the person last clicked the icon on, and no other, so an application on
+    // a site this list does not name can still be filled. That grant is
+    // Chrome's, per tab, gone on navigation; the extension holds nothing. See
+    // src/fill/inject.ts, the only module allowed to use it.
+    permissions: [
+      'offscreen',
+      'unlimitedStorage',
+      'sidePanel',
+      'storage',
+      'activeTab',
+      'scripting',
+    ],
     // chrome.offscreen needs 109, chrome.sidePanel 114, and hasDocument() 116,
     // which background.ts calls unguarded. Below that the first message throws
     // and the panel shows a failure it cannot explain.

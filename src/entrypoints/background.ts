@@ -14,11 +14,13 @@
 // gate, after the first design put the key store in the offscreen document
 // and every open failed with "Cannot read properties of undefined".
 import { defineBackground } from 'wxt/utils/define-background';
-import { atsForUrl } from '../ats/registry';
+import { atsForUrl, boardList } from '../ats/registry';
 import type { VaultState } from '../db/schema';
 import { classify } from '../fill/detect';
 import type { FrameChoice, FrameReport } from '../fill/frames';
 import { chooseFrame, describeFrame } from '../fill/frames';
+import { injectContentScript, isAccessRefused } from '../fill/inject';
+import { reachForm } from '../fill/on-demand';
 import { buildPlan, planNeedsResume } from '../fill/plan';
 import { isNoListener, rollCall } from '../fill/roll-call';
 import type { FillReport } from '../fill/types';
@@ -110,10 +112,6 @@ async function withVault<T>(run: () => Promise<T>): Promise<T> {
   await ensureOffscreen();
   return run();
 }
-
-/** The page is not a job board at all: no frame is running our content script. */
-const NOT_A_BOARD =
-  'PageMyCV does not know this page. It works on Lever and Greenhouse application forms, including ones embedded in a company careers page.';
 
 /**
  * It IS a board, and there is no form on it.
@@ -253,9 +251,21 @@ async function fillActiveTab(): Promise<FillReport> {
   // NOTHING is listening, because a page with no content script will not grow
   // one, and spending the retry budget there made an ordinary page take two
   // seconds to say it is not a job board.
-  const { frames, reachable } = await callFrames(tabId, (f) => chooseFrame(f) !== null);
-  const choice: FrameChoice | null = chooseFrame(frames);
-  if (!choice) throw new Error(reachable ? NO_FORM_HERE : NOT_A_BOARD);
+  //
+  // On a board the manifest names, something answers the first roll call.
+  // Anywhere else nothing does, and the same script is injected into this
+  // tab — which Chrome allows only if the person just clicked the icon on
+  // it. Its refusal becomes the message that says so; see on-demand.ts.
+  const { result } = await reachForm(
+    {
+      rollCall: () => callFrames(tabId, (f) => chooseFrame(f) !== null),
+      inject: () => injectContentScript(tabId),
+      isAccessRefused,
+    },
+    boardList(),
+  );
+  const choice: FrameChoice | null = chooseFrame(result.frames);
+  if (!choice) throw new Error(NO_FORM_HERE);
   const target = { tabId, frameId: choice.frame.frameId };
 
   // A connection error here means the frame went away between the roll call
@@ -269,8 +279,10 @@ async function fillActiveTab(): Promise<FillReport> {
     }
     throw err;
   });
+  // An unknown site resolves to a definition with an empty map, not to a
+  // refusal: the standards-based passes carry the form, as they do on the
+  // declared boards that have no map either.
   const ats = atsForUrl(survey.url);
-  if (ats.id === 'unknown') throw new Error(NOT_A_BOARD);
   if (survey.fields.length === 0) throw new Error(NO_FORM_HERE);
 
   // The values are fetched only once a form is known to exist, so opening the
