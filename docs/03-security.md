@@ -171,6 +171,22 @@ has a full-size rect of its own. The gate now asserts the reason, not just the
 result, and reverting the fix makes it fail with `missing trap_opacity,
 trap_clipped`.
 
+**One release, for one control type, with evidence.** A file input is as
+visible as the thing that opens it. Every board styles its own upload button
+and parks the real `<input type="file">` at one pixel under `clip` and
+`clip-path`, because a native file input cannot be styled; Ashby's résumé
+input is exactly that, and measured alone it was refused as *"1x1 is too
+small to be a real field"*, so the résumé never reached the form. The
+descriptor now also measures the input's **trigger** — its `<label for>`,
+which the browser activates on click, or the parent dropzone when that holds
+a button or a label — and the planner accepts the input when the trigger
+passes the same rule. Nothing else is released: the trigger is recorded for
+file inputs only, a 1x1 text box beside a visible label stays refused, and
+the denylist still runs afterwards. A hidden file input with no label and no
+dropzone stands on its own box and fails, as before. The unit tests pin all
+four of those, and the gate attaches a résumé through a copy of Ashby's
+parked input.
+
 The visibility rule is a pure function over measurements taken once per field,
 which is what lets it be tested exhaustively without a browser. Two details
 earned their place: the opacity threshold is `< 0.05` rather than `=== 0`,

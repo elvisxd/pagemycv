@@ -201,8 +201,8 @@ The risk lands on your account, not on this project. See
 ```bash
 pnpm install
 pnpm build            # then load .output/chrome-mv3 as an unpacked extension
-pnpm check            # typecheck, lint, 406 unit tests, and the invariant guard
-node tests/e2e/gate.cjs   # 121 checks against a real browser, every phase so far
+pnpm check            # typecheck, lint, 421 unit tests, and the invariant guard
+node tests/e2e/gate.cjs   # 126 checks against a real browser, every phase so far
 ```
 
 ## License

@@ -196,7 +196,7 @@ const LABEL_RULES: readonly { kind: FieldKind; pattern: RegExp; not?: RegExp }[]
     // Chromium has no preferred-name type at all: `FULL_NAME` matches
     // `full.?name`, so "Preferred Full Name" was classified as the legal
     // name and filled with it. `NAME_IGNORED` covers `nickname` but not
-    // `preferred`, so nothing vetoed it either. See SHARPER_THAN_CHROMIUM.
+    // `preferred`, so nothing vetoed it either. See LABEL_OVERRIDES.
     kind: 'preferred_name',
     pattern:
       /\bpreferred\b[^.?]{0,20}\bname\b|\bnickname\b|\bgoes by\b|\bname you go by\b|\bwhat should we call you\b/,
@@ -259,8 +259,11 @@ const LABEL_RULES: readonly { kind: FieldKind; pattern: RegExp; not?: RegExp }[]
     // Ashby asks for the whole place in one box where the other two boards
     // ask for city and region separately.
     kind: 'location',
+    // Anchored at the start, not at both ends: the text this runs over is
+    // the label AND the placeholder, so Ashby's "Location" box reads as
+    // "location start typing..." and `^location$` never saw it.
     pattern:
-      /^location$|\b(your|current) location\b|\bwhere are you (based|located)\b|\bcity and (state|province|region|country)\b/,
+      /^location\b|\b(your|current) location\b|\bwhere are you (based|located)\b|\bcity and (state|province|region|country)\b/,
     // A work-location preference is a different question, and so is the
     // posting's own location.
     not: /\b(preference|type|remote|hybrid|on ?site|willing|relocat\w+|job|role|office)\b/,
@@ -282,23 +285,29 @@ const LABEL_RULES: readonly { kind: FieldKind; pattern: RegExp; not?: RegExp }[]
 ];
 
 /**
- * Kinds where OUR label rule beats Chromium's guess.
+ * Kinds where OUR label rule beats Chromium's guess AND the per-ATS map.
  *
- * Normally Chromium wins: its patterns carry a negative half that hand-rolled
- * heuristics forget, which is most of why they are vendored at all. This set
- * is for the cases where Chromium has no type for the question, so a broader
- * type of its own claims the field and is confidently wrong.
+ * Normally those win: Chromium's patterns carry a negative half that
+ * hand-rolled heuristics forget, which is most of why they are vendored at
+ * all, and a board's own field name is a contract with its integrators. This
+ * set is for the cases where neither has a type for the question, so a
+ * broader type claims the field and is confidently wrong.
  *
  * `preferred_name` is the whole set today. Chromium's `FULL_NAME` matches
  * `full.?name`, so "Preferred Full Name" — which Ashby puts directly above
  * "Legal Full Name" — was classified as the legal name and filled with it.
  * `NAME_IGNORED` covers `nickname` but not `preferred`, so nothing vetoed it.
+ * Then the real page showed the second half: Ashby's `_systemfield_name` IS
+ * the box labelled "Preferred Full Name" (the legal one is a per-job custom
+ * question with a generated name), so the ATS map said `full_name` about it
+ * with 0.9 confidence and the fix above never ran. The label is the only
+ * thing on that form that says what the box is for.
  *
  * Kept as an explicit list rather than a general rule: "our heuristic beats
- * the vendored one" is the wrong default, and every entry here should have to
+ * the evidence" is the wrong default, and every entry here should have to
  * justify itself the way this one does.
  */
-const SHARPER_THAN_CHROMIUM: ReadonlySet<FieldKind> = new Set<FieldKind>(['preferred_name']);
+const LABEL_OVERRIDES: ReadonlySet<FieldKind> = new Set<FieldKind>(['preferred_name']);
 
 function normalise(field: FieldDescriptor): string {
   return normaliseText(
@@ -375,20 +384,21 @@ export function classify(fields: readonly FieldDescriptor[], ats: AtsDefinition)
     let kind = fromAutocomplete(field);
     let strategy: MatchStrategy | null = kind ? 'autocomplete' : null;
 
-    if (!kind) {
+    // Resolved before the map and the Chromium branch because it can
+    // override both, and skipped entirely when the page said so itself.
+    const labelGuess = kind ? null : fromLabel(field);
+    const overrides = labelGuess !== null && LABEL_OVERRIDES.has(labelGuess);
+
+    if (!kind && !overrides) {
       const fromMap = fromAts(field, table);
       if (fromMap) {
         kind = fromMap;
         strategy = 'ats';
       }
     }
-    // Resolved before the Chromium branch because it can override it, and
-    // skipped entirely when a higher pass has already answered.
-    const labelGuess = kind ? null : fromLabel(field);
-
-    if (!kind && chromiumApplies) {
+    if (!kind && !overrides && chromiumApplies) {
       const guess = chromiumGuesses.get(field.ref);
-      if (guess && !(labelGuess && SHARPER_THAN_CHROMIUM.has(labelGuess))) {
+      if (guess) {
         kind = guess;
         strategy = 'chromium';
       }

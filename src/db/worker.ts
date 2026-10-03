@@ -669,6 +669,10 @@ async function readFillValues(): Promise<{ values: FillValues; documents: Stored
     put('postal_code', await open('postal_code_enc'));
     put('region', c.region as string | null);
     put('country', c.country as string | null);
+    // The one-box version of the place, for the forms that ask for it that
+    // way. Ashby's "Location" was recognised and then reported "nothing
+    // stored for location" because nothing ever built this value.
+    put('location', [values.city, values.region].filter(Boolean).join(', '));
   }
 
   // Sort order 0 is the top of the CV, which is the current or most recent

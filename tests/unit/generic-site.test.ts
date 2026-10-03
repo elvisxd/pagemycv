@@ -45,6 +45,7 @@ function field(over: Partial<FieldDescriptor>): FieldDescriptor {
     readOnly: false,
     options: [],
     metrics: VISIBLE,
+    trigger: null,
     ...over,
   };
   return { ...base, fingerprint: [base.tag, base.type, base.name, base.id].join('|') };

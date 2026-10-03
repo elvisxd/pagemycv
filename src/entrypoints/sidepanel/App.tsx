@@ -306,8 +306,10 @@ export function App() {
   const pickDocument = async (kind: DocumentKind, file: File) => {
     setBusy(true);
     setError(null);
+    let stored = false;
     try {
       await storeDocument(kind, file);
+      stored = true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -315,6 +317,25 @@ export function App() {
       // Clearing it means picking the same file twice in a row still fires.
       const input = kind === 'resume' ? resumeInputRef.current : coverLetterInputRef.current;
       if (input) input.value = '';
+    }
+    // A résumé stored into an empty vault is the CV, and the person has just
+    // handed it over. Elvis did exactly this — stored the PDF under "Résumé
+    // file", pressed Fill, and got "nothing stored for full name" down the
+    // whole form — because two things on this panel both looked like "give
+    // us your CV" and only one of them read it. So read it: the same review
+    // form opens, nothing is stored until Save, and Cancel keeps the file.
+    if (stored && kind === 'resume' && !profile?.profile) {
+      try {
+        setDraft({
+          ...(await readCvDraft(file)),
+          file: null,
+          source: `${file.name}, the résumé file you just stored`,
+        });
+        setShowImport(true);
+      } catch {
+        // Not readable as a CV, or not a CV at all. The file is stored either
+        // way; the import button stays where it was.
+      }
     }
   };
 
@@ -392,26 +413,31 @@ export function App() {
   };
 
   /** A file becomes a draft to review. Nothing is stored here. */
+  /** Read a file into a draft for review. Throws when it is not a CV. */
+  const readCvDraft = async (file: File): Promise<CvDraft & { file: File | null }> => {
+    const { kind, lines } = await readCvFile(file);
+    const { warnings, ...cv } = parseCvText(lines);
+    // The same refusal the worker makes, made here first so the person is
+    // told before a form of empty boxes appears. The worker still checks.
+    if (cv.work.length === 0 && cv.education.length === 0) throw new Error(NOT_A_CV);
+    const label = kind === 'pdf' ? 'PDF' : kind === 'docx' ? 'Word' : 'text';
+    return {
+      cv,
+      warnings,
+      source: `${file.name} (${label})`,
+      // A PDF or Word CV is also the file to attach to applications. Stored
+      // on Save, with the rest, and only if nothing is stored yet — a file
+      // chosen on purpose under "Résumé file" is not replaced by accident.
+      file: kind === 'pdf' || kind === 'docx' ? file : null,
+    };
+  };
+
   const pickCvFile = async (file: File) => {
     setBusy(true);
     setError(null);
     setImported(null);
     try {
-      const { kind, lines } = await readCvFile(file);
-      const { warnings, ...cv } = parseCvText(lines);
-      // The same refusal the worker makes, made here first so the person is
-      // told before a form of empty boxes appears. The worker still checks.
-      if (cv.work.length === 0 && cv.education.length === 0) throw new Error(NOT_A_CV);
-      const label = kind === 'pdf' ? 'PDF' : kind === 'docx' ? 'Word' : 'text';
-      setDraft({
-        cv,
-        warnings,
-        source: `${file.name} (${label})`,
-        // A PDF or Word CV is also the file to attach to applications. Stored
-        // on Save, with the rest, and only if nothing is stored yet — a file
-        // chosen on purpose under "Résumé file" is not replaced by accident.
-        file: kind === 'pdf' || kind === 'docx' ? file : null,
-      });
+      setDraft(await readCvDraft(file));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -693,6 +719,16 @@ export function App() {
             one page. It fills what it recognises, highlights every value it wrote, and never
             submits: the last click is always yours.
           </p>
+          {!p?.profile ? (
+            <p
+              data-testid="no-cv-note"
+              style={{ color: 'var(--text)', margin: '0 0 8px', fontSize: 12 }}
+            >
+              No CV has been imported yet, so there is no name, email or phone to fill. Storing a
+              résumé file below attaches it to applications but does not read it; use{' '}
+              <strong>Import your CV</strong> above, or pick the résumé file and it is read for you.
+            </p>
+          ) : null}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button onClick={fill} disabled={filling || busy}>
               {filling ? 'Filling…' : 'Fill this form'}

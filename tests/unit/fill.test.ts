@@ -44,6 +44,7 @@ function field(over: Partial<FieldDescriptor> = {}): FieldDescriptor {
     readOnly: false,
     options: [],
     metrics: VISIBLE,
+    trigger: null,
     ...over,
   };
   // Keep the fingerprint consistent with the attributes unless a test sets it
@@ -321,6 +322,48 @@ describe('classify', () => {
     }
   });
 
+  it("lets 'Preferred Full Name' beat Ashby's own `_systemfield_name`, which IS that box", () => {
+    // The real page, not the fixture the first fix was written against:
+    // Ashby's system name field is the one labelled "Preferred Full Name",
+    // and the legal name is a per-job question with a generated name. The
+    // map said `full_name` at 0.9 and the legal name was typed into the box
+    // that asked for the preferred one.
+    const ashby = atsForUrl('https://jobs.ashbyhq.com/npx/abc/application');
+    const [preferred, legal] = classify(
+      [
+        field({ name: '_systemfield_name', id: '_systemfield_name', label: 'Preferred Full Name' }),
+        field({ name: '2b460c11-7aac', id: '2b460c11-7aac', label: 'Legal Full Name' }),
+        field({ name: '_systemfield_email', label: 'Email', type: 'email' }),
+        field({ name: 'dfe370ab', label: 'Phone number', type: 'tel' }),
+      ],
+      ashby,
+    );
+    expect(preferred?.kind).toBe('preferred_name');
+    expect(preferred?.strategy).toBe('label');
+    expect(legal?.kind).toBe('full_name');
+    // The override is for that one label. A plain system name box on a form
+    // that calls it "Name" still takes the map's answer.
+    const [plain] = classify([field({ name: '_systemfield_name', label: 'Name' })], ashby);
+    expect(plain?.kind).toBe('full_name');
+    expect(plain?.strategy).toBe('ats');
+  });
+
+  it("reads Ashby's Location box, whose placeholder rides along with its label", () => {
+    const ashby = atsForUrl('https://jobs.ashbyhq.com/npx/abc/application');
+    const fields = [
+      field({ name: '_systemfield_email', label: 'Email', type: 'email' }),
+      field({ name: 'g2', label: 'Phone number', type: 'tel' }),
+      field({ name: 'g1', label: 'Legal Full Name' }),
+      // No name, no id: the real control has neither.
+      field({ label: 'Location', placeholder: 'Start typing...' }),
+    ];
+    const out = classify(fields, ashby);
+    expect(out[3]?.kind).toBe('location');
+    // And the posting's own location, or a preference, is still not the box.
+    const [pref] = classify([field({ label: 'Location preference' })], ashby);
+    expect(pref?.kind).toBeNull();
+  });
+
   it('leaves a question no pass understands unresolved rather than guessing', () => {
     const [c] = classify([field({ label: 'What is your favourite build tool?' })], LEVER);
     expect(c?.kind).toBeNull();
@@ -429,6 +472,90 @@ describe('buildPlan', () => {
     const [row] = plan([f], VALUES).fields;
     if (row?.action !== 'skip') throw new Error('expected a skip');
     expect(row.reason).toBe('hidden');
+  });
+
+  it('says the one true thing when the vault is empty, instead of a fault per field', () => {
+    const fields = [
+      field({ name: 'name', label: 'Full name' }),
+      field({ name: 'email', type: 'email', label: 'Email' }),
+    ];
+    const rows = plan(fields, {}).fields;
+    for (const row of rows) {
+      if (row.action !== 'skip') throw new Error('expected a skip');
+      expect(row.reason).toBe('no-value');
+      expect(row.detail).toMatch(/^no CV has been imported yet/);
+    }
+    // With anything at all stored, a missing value is that field's own gap.
+    const [row] = plan([fields[1] as FieldDescriptor], { full_name: 'Ada' }).fields;
+    if (row?.action !== 'skip') throw new Error('expected a skip');
+    expect(row.detail).toBe('nothing stored for email');
+  });
+
+  describe('a file input parked at 1x1 behind its own upload button', () => {
+    // How every board draws an upload control: the native input cannot be
+    // styled, so it is clipped to a pixel and a label or a dropzone is drawn
+    // instead. Ashby's résumé input is `clip: rect(0,0,0,0); clip-path:
+    // inset(50%); width: 1px; height: 1px`, and measured on its own it was
+    // refused as "1x1 is too small to be a real field".
+    const parked: VisibilityMetrics = { ...VISIBLE, width: 1, height: 1, clipped: true };
+
+    it('is attached when its label or dropzone is visible', () => {
+      const f = field({
+        type: 'file',
+        id: 'resume',
+        label: 'Resume',
+        metrics: parked,
+        trigger: VISIBLE,
+      });
+      const [row] = plan([f], VALUES, LEVER, 'cv.pdf').fields;
+      expect(row?.action).toBe('attach');
+    });
+
+    it('stays refused when the trigger is hidden too', () => {
+      const f = field({
+        type: 'file',
+        id: 'resume',
+        label: 'Resume',
+        metrics: parked,
+        trigger: { ...VISIBLE, display: 'none' },
+      });
+      const [row] = plan([f], VALUES, LEVER, 'cv.pdf').fields;
+      if (row?.action !== 'skip') throw new Error('expected a skip');
+      expect(row.reason).toBe('hidden');
+    });
+
+    it('stays refused when nothing clickable stands in for it', () => {
+      const f = field({
+        type: 'file',
+        id: 'resume',
+        label: 'Resume',
+        metrics: parked,
+        trigger: null,
+      });
+      const [row] = plan([f], VALUES, LEVER, 'cv.pdf').fields;
+      if (row?.action !== 'skip') throw new Error('expected a skip');
+      expect(row.reason).toBe('hidden');
+    });
+
+    it('releases nothing but a file input: a 1x1 text box beside a visible label is still a trap', () => {
+      const f = field({ name: 'email', label: 'Email', metrics: parked, trigger: VISIBLE });
+      const [row] = plan([f], VALUES).fields;
+      if (row?.action !== 'skip') throw new Error('expected a skip');
+      expect(row.reason).toBe('hidden');
+    });
+
+    it('does not release a denylisted name either', () => {
+      const f = field({
+        type: 'file',
+        name: 'beecatcher',
+        label: 'Resume',
+        metrics: parked,
+        trigger: VISIBLE,
+      });
+      const [row] = plan([f], VALUES, LEVER, 'cv.pdf').fields;
+      if (row?.action !== 'skip') throw new Error('expected a skip');
+      expect(row.reason).toBe('honeypot');
+    });
   });
 
   it('does not overwrite something already typed', () => {

@@ -100,7 +100,7 @@ function isDisabled(el: Control): boolean {
  * the only way. Bounded, and it stops at the first clipping ancestor small
  * enough to matter.
  */
-function clippedByAncestor(el: Control, memo: Map<Element, boolean>): boolean {
+function clippedByAncestor(el: Element, memo: Map<Element, boolean>): boolean {
   const view = el.ownerDocument.defaultView;
   if (!view) return false;
   let node: Element | null = el.parentElement;
@@ -150,7 +150,7 @@ interface PageMetrics {
 }
 
 function measure(
-  el: Control,
+  el: HTMLElement,
   clipMemo: Map<Element, boolean>,
   page: PageMetrics,
 ): VisibilityMetrics {
@@ -264,13 +264,52 @@ export function labelFor(el: Control): string {
   // label of the first one — which is how a value ends up in the right-looking
   // wrong box. One control in the group is the evidence that the label can
   // only be describing this field.
-  const group = deepClosest(el, '[class*="field" i], [class*="question" i], fieldset, li, p, div');
-  if (group && group.querySelectorAll(SELECTOR).length === 1) {
+  //
+  // Walking outward through nested groups, because the nearest one is often
+  // a wrapper that holds the control and nothing else. Ashby's Location box
+  // is `<div class="fieldEntry"><label for="…">Location</label><div
+  // class="inputContainer"><input role="combobox"></div></div>` with no id on
+  // the input, so the `for` never matches and the innermost div has no label
+  // in it. Stopping there reported the field as "Start typing...", its
+  // placeholder, and nothing recognised it. The one-control rule holds at
+  // every step: a wider group that still holds only this control can only be
+  // describing it. Capped, because a form with a single field would otherwise
+  // be labelled by the page's first heading.
+  let group: Element | null = deepClosest(el, GROUP);
+  for (let i = 0; group && i < MAX_GROUP_WALK; i++) {
+    if (group.querySelectorAll(SELECTOR).length !== 1) break;
     const inGroup = group.querySelector('label, legend, .label, [class*="label" i]');
     if (inGroup && !inGroup.contains(el)) return text(inGroup);
+    group = group.parentElement ? deepClosest(group.parentElement, GROUP) : null;
   }
 
   return '';
+}
+
+const GROUP = '[class*="field" i], [class*="question" i], fieldset, li, p, div';
+const MAX_GROUP_WALK = 4;
+
+/**
+ * What a person clicks to open the file picker, for a file input that is
+ * not itself that thing.
+ *
+ * Only two shapes count, and both put a human in the loop: the input's own
+ * label, which the browser activates on click, or a dropzone — the parent
+ * element, when it holds a button or a label of its own. A bare parent with
+ * nothing clickable in it is not a dropzone and does not count; nor does
+ * anything for a control that is not a file input, so a 1x1 text box stays
+ * refused however visible its surroundings are.
+ */
+export function triggerFor(el: Control): HTMLElement | null {
+  if (!(el instanceof HTMLInputElement) || el.type !== 'file') return null;
+  const doc = scopeOf(el);
+  const byId = el.id ? doc.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
+  if (byId instanceof HTMLElement) return byId;
+  const wrapping = deepClosest(el, 'label');
+  if (wrapping instanceof HTMLElement) return wrapping;
+  const parent = el.parentElement;
+  if (parent?.querySelector('button, [role="button"], label')) return parent;
+  return null;
 }
 
 function controlType(el: Control): string {
@@ -356,6 +395,10 @@ export function describeForm(doc: Document = document): {
       readOnly: el instanceof HTMLSelectElement ? false : el.readOnly,
       options: optionsOf(el),
       metrics: measure(el, clipMemo, page),
+      trigger: (() => {
+        const trigger = triggerFor(el);
+        return trigger ? measure(trigger, clipMemo, page) : null;
+      })(),
     });
   });
 

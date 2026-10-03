@@ -8,7 +8,13 @@
 // tests/e2e/gate.cjs exists for.
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Control } from '../../src/fill/descriptor';
-import { countFillable, describeForm, fingerprintOf, labelFor } from '../../src/fill/descriptor';
+import {
+  countFillable,
+  describeForm,
+  fingerprintOf,
+  labelFor,
+  triggerFor,
+} from '../../src/fill/descriptor';
 import type { FillValues, PlannedField } from '../../src/fill/types';
 import { applyPlan, clearHighlights } from '../../src/fill/write';
 
@@ -73,6 +79,35 @@ describe('labelFor', () => {
     expect(labelFor(control('[name="salary_expected"]'))).toBe('');
   });
 
+  it('walks out through wrappers that hold only this control, to the group that names it', () => {
+    // Ashby's Location box, copied: the label's `for` points at an id the
+    // input does not have, and the input sits alone in a wrapper div with no
+    // label in it. Stopping at that wrapper left the field named by its
+    // placeholder, "Start typing...", and nothing recognised it.
+    render(`
+      <div class="_fieldEntry_1e3gg_28">
+        <label class="_label_1e3gg_42" for="_systemfield_location">Location</label>
+        <div class="_inputContainer_d7ago_28">
+          <input class="_input_d7ago_28" placeholder="Start typing..." role="combobox">
+          <button class="_toggleButton_d7ago_32"></button>
+        </div>
+      </div>
+    `);
+    expect(labelFor(control('input'))).toBe('Location');
+  });
+
+  it('still does not borrow a label once a wider group holds a second control', () => {
+    render(`
+      <div class="_fieldEntry_1e3gg_28">
+        <label for="nope">Email</label>
+        <div><input name="first"></div>
+        <div><input name="second"></div>
+      </div>
+    `);
+    expect(labelFor(control('[name="first"]'))).toBe('');
+    expect(labelFor(control('[name="second"]'))).toBe('');
+  });
+
   it('refuses a consent paragraph as a label, because prose is not a question', () => {
     const prose = `I agree that my salary information and email address may be
       processed in accordance with the policy, and I confirm that everything
@@ -80,6 +115,39 @@ describe('labelFor', () => {
       that this consent may be withdrawn at any time by contacting the team.`;
     render(`<label>${prose}<input name="consent_ack"></label>`);
     expect(labelFor(control('input'))).toBe('');
+  });
+});
+
+// ── triggerFor ──────────────────────────────────────────────────────────────
+
+describe('triggerFor', () => {
+  it('is the label[for] of a file input, which the browser activates on click', () => {
+    render('<label for="r">Resume</label><div><input type="file" id="r" tabindex="-1"></div>');
+    expect(triggerFor(control('#r'))?.tagName).toBe('LABEL');
+  });
+
+  it('is the dropzone around it when there is no label but there is a button', () => {
+    render(
+      '<div class="drop"><input type="file" tabindex="-1"><button>Upload File</button><p>or drag and drop here</p></div>',
+    );
+    expect(triggerFor(control('input'))?.className).toBe('drop');
+  });
+
+  it('is nothing for a bare parent with nothing to click', () => {
+    render('<div><input type="file"></div>');
+    expect(triggerFor(control('input'))).toBeNull();
+  });
+
+  it('is nothing for any control that is not a file input, whatever surrounds it', () => {
+    render('<label for="e">Email</label><div><input id="e" type="text"><button>Go</button></div>');
+    expect(triggerFor(control('#e'))).toBeNull();
+  });
+
+  it('is recorded by describeForm for file inputs only', () => {
+    render('<label for="r">Resume</label><input type="file" id="r"><input name="email">');
+    const { fields } = describeForm(document);
+    expect(fields[0]?.trigger).not.toBeNull();
+    expect(fields[1]?.trigger).toBeNull();
   });
 });
 
